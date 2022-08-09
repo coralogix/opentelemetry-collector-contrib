@@ -80,7 +80,7 @@ func (r *zabbixScraper) scrape(ctx context.Context) (pmetric.Metrics, error) {
 }
 
 // collectQueue collects metrics
-func (r *zabbixScraper) collectQueue( now pcommon.Timestamp) {
+func (r *zabbixScraper) collectQueue(now pcommon.Timestamp) {
 	r.logger.Debug("running collectQueue")
 	// TODO: Implement metrics collection
 }

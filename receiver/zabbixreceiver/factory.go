@@ -38,7 +38,7 @@ func NewFactory() component.ReceiverFactory {
 	return component.NewReceiverFactory(
 		typeStr,
 		createDefaultConfig,
-		component.WithMetricsReceiverAndStabilityLevel(createMetricsReceiver, stability))
+		component.WithMetricsReceiver(createMetricsReceiver, stability))
 }
 
 func createDefaultConfig() config.Receiver {
@@ -51,7 +51,6 @@ func createDefaultConfig() config.Receiver {
 			Endpoint: defaultEndpoint,
 			Timeout:  10 * time.Second,
 		},
-		// Metrics: metadata.DefaultMetricsSettings(),
 	}
 }
 

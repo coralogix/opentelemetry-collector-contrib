@@ -36,8 +36,8 @@ const defaultEndpoint = "http://localhost:1053" // TODO check if it is default p
 
 // Config defines the configuration for the various elements of the receiver agent.
 type Config struct {
-	Username                                string                   `mapstructure:"username"`
-	Password                                string                   `mapstructure:"password"`
+	Username string `mapstructure:"username"`
+	Password string `mapstructure:"password"`
 	// TODO remove or change this copy-pasta
 	scraperhelper.ScraperControllerSettings `mapstructure:",squash"`
 	confighttp.HTTPClientSettings           `mapstructure:",squash"`
