@@ -98,6 +98,7 @@ func (r *zabbixScraper) scrape(ctx context.Context) (pmetric.Metrics, error) {
 	}
 
 	// TODO - data to Metrics
-
+	fmt.Println("hosts", hosts)
+	fmt.Println("items", items)
 	panic("not implemented")
 }

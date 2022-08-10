@@ -66,6 +66,8 @@ func newClient(cfg *Config, settings component.TelemetrySettings, logger *zap.Lo
 	if err != nil {
 		return nil, fmt.Errorf("failed to get Zabbix version: %w", err)
 	}
+	// // TODO panics: panic: runtime error: invalid memory address or nil pointer dereference [recovered]
+	// logger.Info("Connected to Zabbix API", zap.String("version", version))
 
 	fmt.Printf("Connected to Zabbix API v%s\n", version)
 
