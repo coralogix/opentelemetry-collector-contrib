@@ -18,10 +18,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
+	"github.com/cavaliercoder/go-zabbix"
 	"go.opentelemetry.io/collector/component"
+
 	// "go.opentelemetry.io/collector/pdata/pcommon"
+	"go.opentelemetry.io/collector/pdata/internal"
+	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.uber.org/zap"
 )
@@ -55,7 +60,7 @@ func (r *zabbixScraper) start(ctx context.Context, host component.Host) (err err
 func (r *zabbixScraper) scrape(ctx context.Context) (pmetric.Metrics, error) {
 	timeNow := time.Now()
 	unixTimeNow := timeNow.Unix()
-	// now := pcommon.NewTimestampFromTime(timeNow)
+	now := pcommon.NewTimestampFromTime(timeNow)
 
 	// Validate we don't attempt to scrape without initializing the client
 	if r.client == nil {
@@ -89,6 +94,7 @@ func (r *zabbixScraper) scrape(ctx context.Context) (pmetric.Metrics, error) {
 		host_ids = append(host_ids, fmt.Sprint(item.HostID))
 	}
 	hosts, err := r.client.GetHosts(ctx, host_ids)
+	host_map := to_host_map(hosts)
 
 	r.logger.Debug("Scraping metrics", zap.Any("hosts", hosts))
 
@@ -97,8 +103,56 @@ func (r *zabbixScraper) scrape(ctx context.Context) (pmetric.Metrics, error) {
 		return pmetric.NewMetrics(), err
 	}
 
-	// TODO - data to Metrics
-	fmt.Println("hosts", hosts)
-	fmt.Println("items", items)
-	panic("not implemented")
+	// TODO
+	metrics := pmetric.NewMetrics()
+	for _, item := range items {
+		host := host_map[fmt.Sprint(item.HostID)]
+		// Initialize the metric
+		metric := metrics.
+		r.logger.Debug("Scraping metrics", zap.Any("item", item), zap.Any("host", host))
+		toMetric(&metric,item, host, now)
+		r.logger.Debug("Scraping metrics", zap.Any("metric", metric))
+		// TODO append to final maetrics
+	}
+
+	return metrics, nil
+}
+
+/** TODO Very naive implementation of conversion to wire it end to end */
+func toMetric(m *internal.Metric, i zabbix.Item, host zabbix.Host, now pcommon.Timestamp) *pmetric.Metric {
+	m.SetName(i.ItemName)
+	m.SetDescription(i.ItemDescr)
+	// metric.SetUnit(i.Units) // TODO - derive from type
+	m.SetDataType(pmetric.MetricDataTypeGauge) // TODO - we need to derive this from somewhere
+
+	// TODO check the error
+	lastValue, _ := convertStringToInt64(i.LastValue)
+	dp := m.Gauge().DataPoints().AppendEmpty()
+	// TODO maybe do not fill in both
+	dp.SetStartTimestamp(now)
+	dp.SetTimestamp(now)
+	dp.SetIntVal(lastValue)
+
+	// TODO set attributes based on host
+	// metric.Attr(host.toResource())
+	return m
+}
+
+func to_host_map(hosts []zabbix.Host) map[string]zabbix.Host {
+	m := make(map[string]zabbix.Host)
+	for _, host := range hosts {
+		m[host.HostID] = host
+	}
+	return m
+}
+
+// convertStringToInt64 values from API unmarshal as int64.
+// This should never fail but worth checking just in case.
+func convertStringToInt64(val string) (int64, error) {
+	res, err := strconv.ParseInt(val, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+
+	return res, err
 }
