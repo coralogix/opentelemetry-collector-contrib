@@ -21,15 +21,14 @@ import (
 	"time"
 
 	"go.opentelemetry.io/collector/component"
-	"go.opentelemetry.io/collector/pdata/pcommon"
+	// "go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.uber.org/zap"
 )
 
 var errClientNotInit = errors.New("client not initialized")
 
-// zabbixScraper handles scraping of Zabbix metrics
-//   from historical data -> items -> hosts
+// zabbixScraper handles scraping of Zabbix metrics, and converting them to OpenTelemetry metrics
 type zabbixScraper struct {
 	client   client
 	logger   *zap.Logger
@@ -47,7 +46,7 @@ func newScraper(logger *zap.Logger, cfg *Config, settings component.ReceiverCrea
 }
 
 // start starts the scraper by creating a new zabbix client on the scraper
-func (r *zabbixScraper) start(ctx context.Context) (err error) {
+func (r *zabbixScraper) start(ctx context.Context, host component.Host) (err error) {
 	r.client, err = newClient(r.cfg, r.settings, r.logger)
 	return
 }

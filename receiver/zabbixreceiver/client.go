@@ -19,7 +19,6 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/cavaliercoder/go-zabbix"
 	"go.opentelemetry.io/collector/component"
