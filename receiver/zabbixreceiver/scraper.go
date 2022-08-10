@@ -16,7 +16,8 @@ package zabbixreceiver // import "github.com/open-telemetry/opentelemetry-collec
 
 import (
 	"context"
-	// "errors"
+	"errors"
+	"fmt"
 	"time"
 
 	"go.opentelemetry.io/collector/component"
@@ -25,31 +26,15 @@ import (
 	"go.uber.org/zap"
 )
 
-// var errClientNotInit = errors.New("client not initialized")
+var errClientNotInit = errors.New("client not initialized")
 
-// // Names of metrics in message_stats
-// const (
-// 	deliverStat        = "deliver"
-// 	publishStat        = "publish"
-// 	ackStat            = "ack"
-// 	dropUnroutableStat = "drop_unroutable"
-// )
-
-// // Metrics to gather from queue message_stats structure
-// var messageStatMetrics = []string{
-// 	deliverStat,
-// 	publishStat,
-// 	ackStat,
-// 	dropUnroutableStat,
-// }
-
-// zabbixScraper handles scraping of RabbitMQ metrics
+// zabbixScraper handles scraping of Zabbix metrics
+//   from historical data -> items -> hosts
 type zabbixScraper struct {
-	// client   client
+	client   client
 	logger   *zap.Logger
 	cfg      *Config
 	settings component.TelemetrySettings
-	// mb       *metadata.MetricsBuilder
 }
 
 // newScraper creates a new scraper
@@ -58,29 +43,62 @@ func newScraper(logger *zap.Logger, cfg *Config, settings component.ReceiverCrea
 		logger:   logger,
 		cfg:      cfg,
 		settings: settings.TelemetrySettings,
-		// mb:       metadata.NewMetricsBuilder(cfg.Metrics, settings.BuildInfo),
 	}
 }
 
-// start starts the scraper by creating a new HTTP Client on the scraper
-func (r *zabbixScraper) start(ctx context.Context, host component.Host) (err error) {
-	// r.client, err = newClient(r.cfg, host, r.settings, r.logger)
+// start starts the scraper by creating a new zabbix client on the scraper
+func (r *zabbixScraper) start(ctx context.Context) (err error) {
+	r.client, err = newClient(r.cfg, r.settings, r.logger)
 	return
 }
 
 // scrape collects metrics from the Zabbix API
 func (r *zabbixScraper) scrape(ctx context.Context) (pmetric.Metrics, error) {
-	now := pcommon.NewTimestampFromTime(time.Now())
+	timeNow := time.Now()
+	unixTimeNow := timeNow.Unix()
+	// now := pcommon.NewTimestampFromTime(timeNow)
 
-	r.logger.Debug("Scraping stuff")
-	r.collectQueue(now)
-	dummy := pmetric.NewMetrics()
-	// TODO: Implement metrics collection
-	return dummy, nil
-}
+	// Validate we don't attempt to scrape without initializing the client
+	if r.client == nil {
+		return pmetric.NewMetrics(), errClientNotInit
+	}
 
-// collectQueue collects metrics
-func (r *zabbixScraper) collectQueue(now pcommon.Timestamp) {
-	r.logger.Debug("running collectQueue")
-	// TODO: Implement metrics collection
+	// TODO all the logic goes here
+	// Get queues for processing
+	histories, err := r.client.GetHistories(ctx, unixTimeNow)
+
+	// TODO Can/should we do it like this?
+	if err != nil {
+		return pmetric.NewMetrics(), err
+	}
+
+	// TODO do we need to filter unique values?
+	item_ids := []string{}
+	for _, history := range histories {
+		item_ids = append(item_ids, fmt.Sprint(history.ItemID))
+	}
+	items, err := r.client.GetItems(ctx, item_ids)
+
+	// TODO Can/should we do it like this?
+	if err != nil {
+		return pmetric.NewMetrics(), err
+	}
+
+	// TODO do we need to filter unique values?
+	host_ids := []string{}
+	for _, item := range items {
+		host_ids = append(host_ids, fmt.Sprint(item.HostID))
+	}
+	hosts, err := r.client.GetHosts(ctx, host_ids)
+
+	r.logger.Debug("Scraping metrics", zap.Any("hosts", hosts))
+
+	// TODO Can/should we do it like this?
+	if err != nil {
+		return pmetric.NewMetrics(), err
+	}
+
+	// TODO - data to Metrics
+
+	panic("not implemented")
 }

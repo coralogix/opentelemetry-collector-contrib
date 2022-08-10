@@ -17,13 +17,9 @@ package zabbixreceiver // import "github.com/open-telemetry/opentelemetry-collec
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"net/http"
 	"time"
-
-	// "encoding/json"
-	"fmt"
-	// "io"
-	// "net/http"
 
 	"github.com/cavaliercoder/go-zabbix"
 	"go.opentelemetry.io/collector/component"
@@ -31,7 +27,7 @@ import (
 )
 
 type client interface {
-	GetHistories(ctx context.Context, seconds_in_past int64, history_type int) ([]zabbix.History, error)
+	GetHistories(ctx context.Context, unix_time_now int64) ([]zabbix.History, error)
 	GetItems(ctx context.Context, item_ids []string) ([]zabbix.Item, error)
 	GetHosts(ctx context.Context, host_ids []string) ([]zabbix.Host, error)
 }
@@ -39,8 +35,9 @@ type client interface {
 var _ client = (*zabbixClient)(nil)
 
 type zabbixClient struct {
-	session zabbix.Session
-	logger  *zap.Logger
+	session                 zabbix.Session
+	scrape_interval_seconds int
+	logger                  *zap.Logger
 }
 
 func newClient(cfg *Config, settings component.TelemetrySettings, logger *zap.Logger) (client, error) {
@@ -73,27 +70,56 @@ func newClient(cfg *Config, settings component.TelemetrySettings, logger *zap.Lo
 
 	fmt.Printf("Connected to Zabbix API v%s\n", version)
 
-	// TODO create it here
 	return &zabbixClient{
-		session: *session,
-		logger:  logger,
+		session:                 *session,
+		scrape_interval_seconds: int(cfg.CollectionInterval.Seconds()),
+		logger:                  logger,
 	}, nil
 }
 
-// GetHistories implements client
-func (c *zabbixClient) GetHistories(ctx context.Context, seconds_in_past int64, history_type int) ([]zabbix.History, error) {
+func (c *zabbixClient) get_history(from_seconds float64, till_seconds float64, history_type int) ([]zabbix.History, error) {
 	params := zabbix.HistoryGetParams{
 		GetParameters: zabbix.GetParameters{},
 		History:       int(history_type),
-		HistoryIDs:    []string{},
-		ItemIDs:       []string{},
-		TimeFrom:      float64(time.Now().Unix() - seconds_in_past),
-		TimeTill:      float64(time.Now().Unix()),
+		TimeFrom:      from_seconds,
+		TimeTill:      till_seconds,
 	}
 
 	res, err := c.session.GetHistories(params)
 
+	if err != nil {
+		c.logger.Debug("failed to get histories", zap.Error(err))
+	}
+
 	return res, err
+
+}
+
+// GetHistories implements client
+func (c *zabbixClient) GetHistories(ctx context.Context, unix_time_now int64) ([]zabbix.History, error) {
+
+	// TODO - use unix_time_now to get the history from the past,
+	//   revisit it if usine scrape_interval_seconds * 2 is not enough
+	from := unix_time_now - int64(c.scrape_interval_seconds*2)
+
+	// TODO understand why this is needed - if we need to scrape them one by one
+	//  and what each of them is about
+	history_types := []int{0, 1, 2, 3, 4, 5}
+
+	var res_histories []zabbix.History
+	var errs []error
+	for _, x := range history_types {
+		res, err := c.get_history(float64(from), float64(unix_time_now), x)
+		res_histories = append(res_histories, res...)
+		errs = append(errs, err)
+	}
+
+	if errs != nil {
+		c.logger.Debug("failed to get histories")
+	}
+
+	// TODO what to return in error channel here?
+	return res_histories, nil
 }
 
 // GetHosts implements client
@@ -103,6 +129,10 @@ func (c *zabbixClient) GetHosts(ctx context.Context, host_ids []string) ([]zabbi
 		HostIDs:       host_ids,
 	}
 	res, err := c.session.GetHosts(params)
+
+	if err != nil {
+		c.logger.Debug("failed to get hosts", zap.Error(err))
+	}
 
 	return res, err
 }
@@ -115,6 +145,10 @@ func (c *zabbixClient) GetItems(ctx context.Context, item_ids []string) ([]zabbi
 	}
 
 	res, err := c.session.GetItems(params)
+
+	if err != nil {
+		c.logger.Debug("failed to get items", zap.Error(err))
+	}
 
 	return res, err
 }
