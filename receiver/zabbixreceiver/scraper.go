@@ -24,8 +24,6 @@ import (
 	"github.com/cavaliercoder/go-zabbix"
 	"go.opentelemetry.io/collector/component"
 
-	// "go.opentelemetry.io/collector/pdata/pcommon"
-	"go.opentelemetry.io/collector/pdata/internal"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.uber.org/zap"
@@ -103,39 +101,53 @@ func (r *zabbixScraper) scrape(ctx context.Context) (pmetric.Metrics, error) {
 		return pmetric.NewMetrics(), err
 	}
 
-	// TODO
-	metrics := pmetric.NewMetrics()
+	md := pmetric.NewMetrics()
+	rms := md.ResourceMetrics()
 	for _, item := range items {
 		host := host_map[fmt.Sprint(item.HostID)]
-		// Initialize the metric
-		metric := metrics.
+		// Initialize new metric
+		rm := rms.AppendEmpty()
 		r.logger.Debug("Scraping metrics", zap.Any("item", item), zap.Any("host", host))
-		toMetric(&metric,item, host, now)
-		r.logger.Debug("Scraping metrics", zap.Any("metric", metric))
-		// TODO append to final maetrics
+		appendMetric(&rm, item, host, now)
+		r.logger.Debug("Scraped metrics", zap.Any("metric", rm))
 	}
 
-	return metrics, nil
+	return md, nil
 }
 
-/** TODO Very naive implementation of conversion to wire it end to end */
-func toMetric(m *internal.Metric, i zabbix.Item, host zabbix.Host, now pcommon.Timestamp) *pmetric.Metric {
-	m.SetName(i.ItemName)
-	m.SetDescription(i.ItemDescr)
-	// metric.SetUnit(i.Units) // TODO - derive from type
-	m.SetDataType(pmetric.MetricDataTypeGauge) // TODO - we need to derive this from somewhere
+/** TODO Very naive implementation of conversion to wire it end to end
+we might need group by HostId / ItemId to reduce the number of metrics
+*/
+func appendMetric(rm *pmetric.ResourceMetrics, i zabbix.Item, host zabbix.Host, now pcommon.Timestamp) (*pmetric.ResourceMetrics, error) {
+	attrs := rm.Resource().Attributes()
+	attrs.InsertString("zabbix.host.name", host.Hostname)
+	attrs.InsertString("zabbix.host.id", host.HostID)
+	attrs.InsertString("zabbix.host.descripton", host.Description)
+	attrs.InsertInt("zabbix.host.status", int64(host.Status))
+	attrs.InsertInt("zabbix.item.id", int64(i.ItemID))
+	// TODO convert more things to attributes? Add config for which to include?
+	ilms := rm.ScopeMetrics()
+	ilm := ilms.AppendEmpty()
+	ilm.Scope().SetName("zabbix-metrics")
+
+	metricsArray := ilm.Metrics()
+	metricsArray.AppendEmpty()
 
 	// TODO check the error
-	lastValue, _ := convertStringToInt64(i.LastValue)
-	dp := m.Gauge().DataPoints().AppendEmpty()
-	// TODO maybe do not fill in both
-	dp.SetStartTimestamp(now)
-	dp.SetTimestamp(now)
-	dp.SetIntVal(lastValue)
+	lastValue, err := convertStringToInt64(i.LastValue)
 
-	// TODO set attributes based on host
-	// metric.Attr(host.toResource())
-	return m
+	// IntGauge
+	met := metricsArray.AppendEmpty()
+	met.SetName(i.ItemName)
+	met.SetDescription(i.ItemDescr)
+	met.SetDataType(pmetric.MetricDataTypeGauge)
+	met.SetUnit("") // TODO
+	dpsInt := met.Gauge().DataPoints()
+	dpInt := dpsInt.AppendEmpty()
+	dpInt.SetTimestamp(now)
+	dpInt.SetIntVal(lastValue)
+
+	return rm, err
 }
 
 func to_host_map(hosts []zabbix.Host) map[string]zabbix.Host {
