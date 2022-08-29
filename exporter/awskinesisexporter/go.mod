@@ -8,7 +8,7 @@ require (
 	github.com/open-telemetry/opentelemetry-collector-contrib/pkg/translator/zipkin v0.58.0
 	github.com/stretchr/testify v1.8.0
 	go.opentelemetry.io/collector v0.58.0
-	go.uber.org/zap v1.22.0
+	go.uber.org/zap v1.23.0
 )
 
 require (
