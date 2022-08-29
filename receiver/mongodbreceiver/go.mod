@@ -14,7 +14,7 @@ require (
 	github.com/testcontainers/testcontainers-go v0.13.0
 	go.mongodb.org/mongo-driver v1.10.1
 	go.opentelemetry.io/collector/pdata v0.58.0
-	go.uber.org/zap v1.22.0
+	go.uber.org/zap v1.23.0
 )
 
 require (
