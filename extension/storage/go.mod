@@ -6,7 +6,7 @@ require (
 	github.com/stretchr/testify v1.8.0
 	go.etcd.io/bbolt v1.3.6
 	go.opentelemetry.io/collector v0.58.0
-	go.uber.org/zap v1.22.0
+	go.uber.org/zap v1.23.0
 
 )
 
