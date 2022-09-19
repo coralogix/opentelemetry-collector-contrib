@@ -8,7 +8,7 @@ require (
 	github.com/open-telemetry/opentelemetry-collector-contrib/pkg/translator/jaeger v0.58.0
 	github.com/stretchr/testify v1.8.0
 	go.opentelemetry.io/collector v0.58.0
-	go.opentelemetry.io/collector/pdata v0.58.0
+	go.opentelemetry.io/collector/pdata v0.60.0
 	go.opentelemetry.io/collector/semconv v0.58.0
 	go.uber.org/zap v1.22.0
 	google.golang.org/genproto v0.0.0-20220519153652-3a47de7e79bd
@@ -52,7 +52,7 @@ require (
 	golang.org/x/net v0.0.0-20220520000938-2e3eb7b945c2 // indirect
 	golang.org/x/sys v0.0.0-20220520151302-bc2c85ada10a // indirect
 	golang.org/x/text v0.3.7 // indirect
-	google.golang.org/grpc v1.48.0 // indirect
+	google.golang.org/grpc v1.49.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
