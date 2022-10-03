@@ -8,8 +8,8 @@ require (
 	github.com/open-telemetry/opentelemetry-collector-contrib v0.58.0
 	github.com/open-telemetry/opentelemetry-collector-contrib/pkg/resourcetotelemetry v0.58.0
 	github.com/stretchr/testify v1.8.0
-	go.opentelemetry.io/collector v0.58.0
-	go.opentelemetry.io/collector/pdata v0.58.0
+	go.opentelemetry.io/collector v0.61.0
+	go.opentelemetry.io/collector/pdata v0.61.0
 	go.uber.org/multierr v1.8.0
 	golang.org/x/mod v0.6.0-dev.0.20220419223038-86c51ed26bb4
 	golang.org/x/text v0.3.7
@@ -238,8 +238,8 @@ require (
 	github.com/karrick/godirwalk v1.16.1 // indirect
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51 // indirect
 	github.com/keybase/go-keychain v0.0.0-20190712205309-48d3d31d256d // indirect
-	github.com/klauspost/compress v1.15.9 // indirect
-	github.com/knadh/koanf v1.4.2 // indirect
+	github.com/klauspost/compress v1.15.10 // indirect
+	github.com/knadh/koanf v1.4.3 // indirect
 	github.com/kolo/xmlrpc v0.0.0-20201022064351-38db28db192b // indirect
 	github.com/leoluk/perflib_exporter v0.1.0 // indirect
 	github.com/lib/pq v1.10.6 // indirect
@@ -478,7 +478,7 @@ require (
 	github.com/scaleway/scaleway-sdk-go v1.0.0-beta.9 // indirect
 	github.com/seccomp/libseccomp-golang v0.9.2-0.20220502022130-f33da4d89646 // indirect
 	github.com/secure-systems-lab/go-securesystemslib v0.3.1 // indirect
-	github.com/shirou/gopsutil/v3 v3.22.7 // indirect
+	github.com/shirou/gopsutil/v3 v3.22.8 // indirect
 	github.com/shopspring/decimal v1.3.1 // indirect
 	github.com/signalfx/com_signalfx_metrics_protobuf v0.0.3 // indirect
 	github.com/signalfx/gohistogram v0.0.0-20160107210732-1ccfd2ff5083 // indirect
@@ -530,23 +530,23 @@ require (
 	go.mongodb.org/atlas v0.16.0 // indirect
 	go.mongodb.org/mongo-driver v1.10.1 // indirect
 	go.opencensus.io v0.23.0 // indirect
-	go.opentelemetry.io/collector/semconv v0.58.0 // indirect
-	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.34.0 // indirect
-	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.34.0 // indirect
-	go.opentelemetry.io/contrib/zpages v0.34.0 // indirect
-	go.opentelemetry.io/otel v1.9.0 // indirect
-	go.opentelemetry.io/otel/metric v0.31.0 // indirect
-	go.opentelemetry.io/otel/sdk v1.9.0 // indirect
-	go.opentelemetry.io/otel/trace v1.9.0 // indirect
-	go.uber.org/atomic v1.9.0 // indirect
+	go.opentelemetry.io/collector/semconv v0.61.0 // indirect
+	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.36.0 // indirect
+	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.36.0 // indirect
+	go.opentelemetry.io/contrib/zpages v0.36.0 // indirect
+	go.opentelemetry.io/otel v1.10.0 // indirect
+	go.opentelemetry.io/otel/metric v0.32.1 // indirect
+	go.opentelemetry.io/otel/sdk v1.10.0 // indirect
+	go.opentelemetry.io/otel/trace v1.10.0 // indirect
+	go.uber.org/atomic v1.10.0 // indirect
 	go.uber.org/goleak v1.1.12 // indirect
-	go.uber.org/zap v1.22.0 // indirect
+	go.uber.org/zap v1.23.0 // indirect
 	golang.org/x/crypto v0.0.0-20220722155217-630584e8d5aa // indirect
 	golang.org/x/exp v0.0.0-20220713135740-79cabaa25d75 // indirect
 	golang.org/x/net v0.0.0-20220708220712-1185a9018129 // indirect
 	golang.org/x/oauth2 v0.0.0-20220628200809-02e64fa58f26 // indirect
 	golang.org/x/sync v0.0.0-20220601150217-0de741cfad7f // indirect
-	golang.org/x/sys v0.0.0-20220627191245-f75cf1eec38b // indirect
+	golang.org/x/sys v0.0.0-20220808155132-1c4a2a72c664 // indirect
 	golang.org/x/term v0.0.0-20210927222741-03fcf44c2211 // indirect
 	golang.org/x/time v0.0.0-20220609170525-579cf78fd858 // indirect
 	golang.org/x/tools v0.1.11 // indirect
@@ -555,7 +555,7 @@ require (
 	google.golang.org/api v0.91.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
 	google.golang.org/genproto v0.0.0-20220706185917-7780775163c4 // indirect
-	google.golang.org/grpc v1.48.0 // indirect
+	google.golang.org/grpc v1.49.0 // indirect
 	google.golang.org/protobuf v1.28.1 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/ini.v1 v1.66.4 // indirect
