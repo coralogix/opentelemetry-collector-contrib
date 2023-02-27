@@ -3,7 +3,7 @@ module github.com/open-telemetry/opentelemetry-collector-contrib/internal/shared
 go 1.18
 
 require (
-	github.com/stretchr/testify v1.8.0
+	github.com/stretchr/testify v1.8.2
 	go.opentelemetry.io/collector v0.61.1-0.20221011194806-6e554f2d823b
 )
 
