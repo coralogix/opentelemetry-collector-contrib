@@ -12,7 +12,7 @@ require go.uber.org/multierr v1.8.0
 
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.3.0
-	github.com/stretchr/testify v1.8.0
+	github.com/stretchr/testify v1.8.2
 	go.opentelemetry.io/collector/pdata v0.61.1-0.20221011194806-6e554f2d823b
 	go.opentelemetry.io/collector/semconv v0.61.1-0.20221011194806-6e554f2d823b
 )
