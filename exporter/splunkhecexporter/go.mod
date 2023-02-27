@@ -6,7 +6,7 @@ require (
 	github.com/json-iterator/go v1.1.12
 	github.com/open-telemetry/opentelemetry-collector-contrib/internal/splunk v0.61.0
 	github.com/open-telemetry/opentelemetry-collector-contrib/pkg/batchperresourceattr v0.61.0
-	github.com/stretchr/testify v1.8.0
+	github.com/stretchr/testify v1.8.2
 	go.opentelemetry.io/collector v0.61.1-0.20221011194806-6e554f2d823b
 	go.opentelemetry.io/collector/pdata v0.61.1-0.20221011194806-6e554f2d823b
 	go.opentelemetry.io/collector/semconv v0.61.1-0.20221011194806-6e554f2d823b
