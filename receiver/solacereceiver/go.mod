@@ -18,7 +18,7 @@ go 1.18
 
 require (
 	github.com/Azure/go-amqp v0.17.5
-	github.com/stretchr/testify v1.8.0
+	github.com/stretchr/testify v1.8.2
 	go.opencensus.io v0.23.0
 	go.opentelemetry.io/collector v0.61.1-0.20221011194806-6e554f2d823b
 	go.opentelemetry.io/collector/pdata v0.61.1-0.20221011194806-6e554f2d823b
