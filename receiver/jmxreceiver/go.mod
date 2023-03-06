@@ -4,8 +4,8 @@ go 1.18
 
 require (
 	github.com/open-telemetry/opentelemetry-collector-contrib/internal/common v0.61.0
-	github.com/shirou/gopsutil/v3 v3.22.9
-	github.com/stretchr/testify v1.8.0
+	github.com/shirou/gopsutil/v3 v3.23.2
+	github.com/stretchr/testify v1.8.2
 	github.com/testcontainers/testcontainers-go v0.14.0
 	go.opentelemetry.io/collector v0.61.1-0.20221011194806-6e554f2d823b
 	go.opentelemetry.io/collector/pdata v0.61.1-0.20221011194806-6e554f2d823b
@@ -60,8 +60,8 @@ require (
 	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
 	github.com/rs/cors v1.8.2 // indirect
 	github.com/sirupsen/logrus v1.8.1 // indirect
-	github.com/tklauser/go-sysconf v0.3.10 // indirect
-	github.com/tklauser/numcpus v0.4.0 // indirect
+	github.com/tklauser/go-sysconf v0.3.11 // indirect
+	github.com/tklauser/numcpus v0.6.0 // indirect
 	github.com/yusufpapurcu/wmi v1.2.2 // indirect
 	go.opencensus.io v0.23.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.36.1 // indirect
@@ -72,7 +72,7 @@ require (
 	go.uber.org/multierr v1.8.0 // indirect
 	golang.org/x/net v0.0.0-20220909164309-bea034e7d591 // indirect
 	golang.org/x/oauth2 v0.0.0-20220909003341-f21342109be1 // indirect
-	golang.org/x/sys v0.0.0-20220808155132-1c4a2a72c664 // indirect
+	golang.org/x/sys v0.5.0 // indirect
 	golang.org/x/text v0.3.7 // indirect
 	google.golang.org/genproto v0.0.0-20220915135415-7fd63a7952de // indirect
 	google.golang.org/grpc v1.50.0 // indirect
