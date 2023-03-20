@@ -9,7 +9,7 @@ require (
 	go.opentelemetry.io/collector v0.61.1-0.20221011194806-6e554f2d823b
 	go.opentelemetry.io/collector/pdata v0.61.1-0.20221011194806-6e554f2d823b
 	go.opentelemetry.io/collector/semconv v0.61.1-0.20221011194806-6e554f2d823b
-	go.uber.org/multierr v1.8.0
+	go.uber.org/multierr v1.10.0
 	google.golang.org/grpc v1.50.0
 	google.golang.org/protobuf v1.28.1
 	skywalking.apache.org/repo/goapi v0.0.0-20220121092418-9c455d0dda3f
