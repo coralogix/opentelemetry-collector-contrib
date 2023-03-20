@@ -4,7 +4,7 @@ go 1.18
 
 require (
 	go.opentelemetry.io/collector v0.61.1-0.20221011194806-6e554f2d823b
-	go.uber.org/multierr v1.8.0
+	go.uber.org/multierr v1.10.0
 	go.uber.org/zap v1.23.0
 )
 
