@@ -12,7 +12,7 @@ require (
 	go.opentelemetry.io/collector/confmap v0.75.0
 	go.opentelemetry.io/collector/consumer v0.75.0
 	go.opentelemetry.io/collector/exporter v0.75.0
-	go.opentelemetry.io/collector/pdata v1.0.0-rc9
+	go.opentelemetry.io/collector/pdata v1.0.0-rcv0011
 	go.opentelemetry.io/collector/semconv v0.75.0
 	google.golang.org/grpc v1.54.0
 	skywalking.apache.org/repo/goapi v0.0.0-20211122071111-ffc517fbfe21
