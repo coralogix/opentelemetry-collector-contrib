@@ -7,7 +7,7 @@ require (
 	github.com/DataDog/datadog-agent/pkg/trace v0.44.0-rc.6
 	github.com/DataDog/datadog-api-client-go/v2 v2.11.0
 	github.com/DataDog/gohai v0.0.0-20220718130825-1776f9beb9cc
-	github.com/DataDog/opentelemetry-mapping-go/pkg/otlp/attributes v0.1.4
+	github.com/DataDog/opentelemetry-mapping-go/pkg/otlp/attributes v0.2.0
 	github.com/DataDog/opentelemetry-mapping-go/pkg/otlp/metrics v0.1.4
 	github.com/DataDog/opentelemetry-mapping-go/pkg/quantile v0.1.4
 	github.com/DataDog/sketches-go v1.4.1
@@ -30,7 +30,7 @@ require (
 	go.opentelemetry.io/collector/consumer v0.75.0
 	go.opentelemetry.io/collector/exporter v0.75.0
 	go.opentelemetry.io/collector/featuregate v0.75.0
-	go.opentelemetry.io/collector/pdata v1.0.0-rc9
+	go.opentelemetry.io/collector/pdata v1.0.0-rcv0011
 	go.opentelemetry.io/collector/processor/batchprocessor v0.75.0
 	go.opentelemetry.io/collector/receiver v0.75.0
 	go.opentelemetry.io/collector/receiver/otlpreceiver v0.75.0

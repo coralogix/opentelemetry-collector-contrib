@@ -73,8 +73,8 @@ github.com/DataDog/go-tuf v0.3.0--fix-localmeta-fork/go.mod h1:yA5JwkZsHTLuqq3za
 github.com/DataDog/gohai v0.0.0-20220718130825-1776f9beb9cc h1:gtlKB6B50/UEuFm1LeMn0R5a+tubx69OecPqxfXJDmU=
 github.com/DataDog/gohai v0.0.0-20220718130825-1776f9beb9cc/go.mod h1:oyPC4jWHHjVVNjslDAKp8EqfQBaSmODjHt4HCX+C+9Q=
 github.com/DataDog/opentelemetry-mapping-go/pkg/internal/sketchtest v0.1.4 h1:5gC2zb2xTNyDGuWwHWbje/sJiyaBcSo4rBERCnG42ds=
-github.com/DataDog/opentelemetry-mapping-go/pkg/otlp/attributes v0.1.4 h1:tl35Ud2sh1P8mFo2bWWM3yqtDnLeDouWE//NvtDUb4M=
-github.com/DataDog/opentelemetry-mapping-go/pkg/otlp/attributes v0.1.4/go.mod h1:LMY0LJIbNndS+68ouip+w1G7dieGkoA1TjLZyvVzbyg=
+github.com/DataDog/opentelemetry-mapping-go/pkg/otlp/attributes v0.2.0 h1:WiLLKBFvMf8R53s610OlgsgsOk5m9t7imfDSj9qUDQs=
+github.com/DataDog/opentelemetry-mapping-go/pkg/otlp/attributes v0.2.0/go.mod h1:FN5Kqegof+xUhQy4W3rIQ7qHpBehbB6EnEs1BXWzJDI=
 github.com/DataDog/opentelemetry-mapping-go/pkg/otlp/metrics v0.1.4 h1:oTzK1ODPO+Y15uMfH14Kq28G+IYJW7N6/7YcMnPbJzU=
 github.com/DataDog/opentelemetry-mapping-go/pkg/otlp/metrics v0.1.4/go.mod h1:PXGHb9BTwC7hTFtwoK6UAPChFLHVwVJ4/FzzRo7StO4=
 github.com/DataDog/opentelemetry-mapping-go/pkg/quantile v0.1.4 h1:mWD1HhyYzADExrGxZyW0X5inEg+TiqlaMZQJyb/w2yk=
@@ -714,8 +714,8 @@ go.opentelemetry.io/collector/exporter v0.75.0/go.mod h1:wYSNU8OwTmnrgTK5bk84H++
 go.opentelemetry.io/collector/extension/zpagesextension v0.75.0 h1:QHqkG2oEOSP3npFH8sTw4XQh9A138q+fVzAUw6YFNFw=
 go.opentelemetry.io/collector/featuregate v0.75.0 h1:543kdhXh7/dHTwpHsjv+lgIz73RJD2lCkLrFi4UjZjk=
 go.opentelemetry.io/collector/featuregate v0.75.0/go.mod h1:pmVMr98Ps6QKyEHiVPN7o3Qd8K//M2NapfOv5BMWvA0=
-go.opentelemetry.io/collector/pdata v1.0.0-rc9 h1:K1GND9w4hOMVE4lLpGt+0KvjIBcbsR54ZsijEyUQFFI=
-go.opentelemetry.io/collector/pdata v1.0.0-rc9/go.mod h1:olBmmDzT077Jyag/kVDAaG9OFkzLF6zSm8mfufL4HW4=
+go.opentelemetry.io/collector/pdata v1.0.0-rcv0011 h1:7lT0vseP89mHtUpvgmWYRvQZ0eY+SHbVsnXY20xkoMg=
+go.opentelemetry.io/collector/pdata v1.0.0-rcv0011/go.mod h1:9vrXSQBeMRrdfGt9oMgYweqERJ8adaiQjN6LSbqRMMA=
 go.opentelemetry.io/collector/processor/batchprocessor v0.75.0 h1:eMRde/kjWdgpBKFWRS7Z1sfv20IvapdDMyOAV/I1ZZ8=
 go.opentelemetry.io/collector/processor/batchprocessor v0.75.0/go.mod h1:QK6WYbCI1rkX08AliBnWKiWkUhy8d08pG3n02GKw2lY=
 go.opentelemetry.io/collector/receiver v0.75.0 h1:ZgoShBSTprt7vExTLtXTmEH05qIHU3tORhBWyk0PuB4=
