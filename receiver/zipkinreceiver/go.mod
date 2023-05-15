@@ -14,7 +14,7 @@ require (
 	go.opentelemetry.io/collector/consumer v0.75.0
 	go.opentelemetry.io/collector/pdata v1.0.0-rc9
 	go.opentelemetry.io/collector/receiver v0.75.0
-	go.opentelemetry.io/collector/semconv v0.75.0
+	go.opentelemetry.io/collector/semconv v0.77.0
 	google.golang.org/protobuf v1.30.0
 )
 
