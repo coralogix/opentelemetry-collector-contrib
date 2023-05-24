@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/DataDog/datadog-agent/pkg/trace/pb"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/stretchr/testify/assert"
 	vmsgp "github.com/vmihailenco/msgpack/v4"
 )
@@ -81,13 +82,21 @@ func TestTracePayloadV05Unmarshalling(t *testing.T) {
 		Chunks:          traceChunksFromTraces(traces),
 		TracerVersion:   req.Header.Get("Datadog-Meta-Tracer-Version"),
 	}, req)
+
+	spew.Dump(translated)
 	assert.Equal(t, 1, translated.SpanCount(), "Span Count wrong")
+	resource := translated.ResourceSpans().At(0).Resource()
+	assert.Equal(t, 2, resource.Attributes().Len(), "missing resource attributes")
+	value, exists := resource.Attributes().Get("service.name")
+	assert.True(t, exists, "service.name missing")
+	assert.Equal(t, "my-service", value.AsString(), "service.name resource attribute value incorrect")
+
 	span := translated.ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0)
 	assert.NotNil(t, span)
-	assert.Equal(t, 4, span.Attributes().Len(), "missing tags")
-	value, exists := span.Attributes().Get("service.name")
+	assert.Equal(t, 4, span.Attributes().Len(), "missing resource attribute")
+	value, exists = span.Attributes().Get("service.name")
 	assert.True(t, exists, "service.name missing")
-	assert.Equal(t, "my-service", value.AsString(), "service.name tag value incorrect")
+	assert.Equal(t, "my-service", value.AsString(), "service.name attribute value incorrect")
 	assert.Equal(t, span.Name(), "my-resource")
 }
 

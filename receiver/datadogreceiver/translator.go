@@ -33,7 +33,7 @@ import (
 func addResourceData(req *http.Request, rs *pcommon.Resource) {
 	attrs := rs.Attributes()
 	attrs.Clear()
-	attrs.EnsureCapacity(3)
+	//attrs.EnsureCapacity(3)
 	attrs.PutStr("telemetry.sdk.name", "Datadog")
 	ddTracerVersion := req.Header.Get("Datadog-Meta-Tracer-Version")
 	if ddTracerVersion != "" {
@@ -51,19 +51,19 @@ func toTraces(payload *pb.TracerPayload, req *http.Request) ptrace.Traces {
 		traces = append(traces, p.GetSpans())
 	}
 	dest := ptrace.NewTraces()
-	resSpans := dest.ResourceSpans().AppendEmpty()
-	resource := resSpans.Resource()
-	addResourceData(req, &resource)
-	resSpans.SetSchemaUrl(semconv.SchemaURL)
-
 	for _, trace := range traces {
-		ils := resSpans.ScopeSpans().AppendEmpty()
-		ils.Scope().SetName("Datadog-" + req.Header.Get("Datadog-Meta-Lang"))
-		ils.Scope().SetVersion(req.Header.Get("Datadog-Meta-Tracer-Version"))
-		spans := ptrace.NewSpanSlice()
-		spans.EnsureCapacity(len(trace))
 		for _, span := range trace {
-			newSpan := spans.AppendEmpty()
+			resSpans := dest.ResourceSpans().AppendEmpty()
+			resource := resSpans.Resource()
+			addResourceData(req, &resource)
+			resAttrs := resource.Attributes()
+			resSpans.SetSchemaUrl(semconv.SchemaURL)
+
+			ils := resSpans.ScopeSpans().AppendEmpty()
+			ils.Scope().SetName("Datadog-" + req.Header.Get("Datadog-Meta-Lang"))
+			ils.Scope().SetVersion(req.Header.Get("Datadog-Meta-Tracer-Version"))
+
+			newSpan := ils.Spans().AppendEmpty()
 
 			newSpan.SetTraceID(uInt64ToTraceID(0, span.TraceID))
 			newSpan.SetSpanID(uInt64ToSpanID(span.SpanID))
@@ -79,12 +79,31 @@ func toTraces(payload *pb.TracerPayload, req *http.Request) ptrace.Traces {
 			}
 
 			attrs := newSpan.Attributes()
-			attrs.EnsureCapacity(len(span.GetMeta()) + 1)
-			attrs.PutStr(semconv.AttributeServiceName, span.Service)
+			resAttrs.PutStr(semconv.AttributeServiceName, span.Service)
 			for k, v := range span.GetMeta() {
-				k = translateDataDogKeyToOtel(k)
-				if len(k) > 0 {
-					attrs.PutStr(k, v)
+				switch strings.ToLower(k) {
+				case "env":
+					resAttrs.PutStr(semconv.AttributeDeploymentEnvironment, v)
+				case "version":
+					resAttrs.PutStr(semconv.AttributeServiceVersion, v)
+				case "container_id":
+					resAttrs.PutStr(semconv.AttributeContainerID, v)
+				case "container_name":
+					resAttrs.PutStr(semconv.AttributeContainerName, v)
+				case "image_name":
+					resAttrs.PutStr(semconv.AttributeContainerImageName, v)
+				case "image_tag":
+					resAttrs.PutStr(semconv.AttributeContainerImageTag, v)
+				case "process_id":
+					resAttrs.PutStr(semconv.AttributeProcessPID, v)
+				case "error.stacktrace":
+					attrs.PutStr(semconv.AttributeExceptionStacktrace, v)
+				case "error.msg":
+					attrs.PutStr(semconv.AttributeExceptionMessage, v)
+				default:
+					if len(k) > 0 {
+						attrs.PutStr(k, v)
+					}
 				}
 			}
 
@@ -114,36 +133,9 @@ func toTraces(payload *pb.TracerPayload, req *http.Request) ptrace.Traces {
 				}
 			}
 		}
-		spans.MoveAndAppendTo(ils.Spans())
 	}
 
 	return dest
-}
-
-func translateDataDogKeyToOtel(k string) string {
-	switch strings.ToLower(k) {
-	case "env":
-		return semconv.AttributeDeploymentEnvironment
-	case "version":
-		return semconv.AttributeServiceVersion
-	case "container_id":
-		return semconv.AttributeContainerID
-	case "container_name":
-		return semconv.AttributeContainerName
-	case "image_name":
-		return semconv.AttributeContainerImageName
-	case "image_tag":
-		return semconv.AttributeContainerImageTag
-	case "process_id":
-		return semconv.AttributeProcessPID
-	case "error.stacktrace":
-		return semconv.AttributeExceptionStacktrace
-	case "error.msg":
-		return semconv.AttributeExceptionMessage
-	default:
-		return k
-	}
-
 }
 
 var bufferPool = sync.Pool{
