@@ -32,27 +32,43 @@ func newDataDogReceiver(config *Config, nextConsumer consumer.Traces, params rec
 	if err != nil {
 		return nil, err
 	}
+
 	return &datadogReceiver{
 		params:       params,
 		config:       config,
 		nextConsumer: nextConsumer,
 		server: &http.Server{
 			ReadTimeout: config.ReadTimeout,
-			Addr:        config.HTTPServerSettings.Endpoint,
 		},
 		tReceiver: instance,
 	}, nil
 }
 
 func (ddr *datadogReceiver) Start(_ context.Context, host component.Host) error {
+	ddmux := http.NewServeMux()
+	ddmux.HandleFunc("/v0.3/traces", ddr.handleTraces)
+	ddmux.HandleFunc("/v0.4/traces", ddr.handleTraces)
+	ddmux.HandleFunc("/v0.5/traces", ddr.handleTraces)
+	ddmux.HandleFunc("/v0.7/traces", ddr.handleTraces)
+
+	if ddr.config != nil {
+		var err error
+		ddr.server, err = ddr.config.HTTPServerSettings.ToServer(
+			host,
+			ddr.params.TelemetrySettings,
+			ddmux,
+		)
+		if err != nil {
+			return fmt.Errorf("error configuring datadog receiver http server: %w", err)
+		}
+	}
+	hln, err := ddr.config.HTTPServerSettings.ToListener()
+	if err != nil {
+		return fmt.Errorf("error configuring datadog receiver listener: %w", err)
+	}
+
 	go func() {
-		ddmux := http.NewServeMux()
-		ddmux.HandleFunc("/v0.3/traces", ddr.handleTraces)
-		ddmux.HandleFunc("/v0.4/traces", ddr.handleTraces)
-		ddmux.HandleFunc("/v0.5/traces", ddr.handleTraces)
-		ddmux.HandleFunc("/v0.7/traces", ddr.handleTraces)
-		ddr.server.Handler = ddmux
-		if err := ddr.server.ListenAndServe(); err != http.ErrServerClosed {
+		if err := ddr.server.Serve(hln); err != http.ErrServerClosed {
 			host.ReportFatalError(fmt.Errorf("error starting datadog receiver: %w", err))
 		}
 	}()
