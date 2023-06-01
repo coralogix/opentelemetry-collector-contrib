@@ -10,6 +10,7 @@ RUN --mount=type=cache,mode=0755,target=/go/pkg/mod go mod vendor
 RUN cd ./cmd/otelcontribcol && go build .
 
 FROM ubuntu:20.04 as release
+#FROM openjdk:21-ea-20-jdk-buster as release
 RUN apt-get update && apt-get install \
     ca-certificates \
     curl \

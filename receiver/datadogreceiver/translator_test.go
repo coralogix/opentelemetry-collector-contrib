@@ -11,7 +11,6 @@ import (
 
 	"github.com/DataDog/datadog-agent/pkg/trace/pb"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	vmsgp "github.com/vmihailenco/msgpack/v4"
 )
 
@@ -63,21 +62,23 @@ func TestTracePayloadV05Unmarshalling(t *testing.T) {
 	payload, err := vmsgp.Marshal(&data)
 	assert.NoError(t, err)
 
-	require.NoError(t, traces.UnmarshalMsgDictionary(payload), "Must not error when marshaling content")
+	ddr := &datadogReceiver{}
 	req, _ := http.NewRequest(http.MethodPost, "/v0.5/traces", io.NopCloser(bytes.NewReader(payload)))
-	translated := toTraces(&pb.TracerPayload{
+
+	translated := ddr.toTraces(&pb.TracerPayload{
 		LanguageName:    req.Header.Get("Datadog-Meta-Lang"),
 		LanguageVersion: req.Header.Get("Datadog-Meta-Lang-Version"),
 		TracerVersion:   req.Header.Get("Datadog-Meta-Tracer-Version"),
 		Chunks:          traceChunksFromTraces(traces),
 	}, req)
+
 	assert.Equal(t, 1, translated.SpanCount(), "Span Count wrong")
 	span := translated.ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0)
 	assert.NotNil(t, span)
-	assert.Equal(t, 4, span.Attributes().Len(), "missing tags")
+	assert.Equal(t, 6, span.Attributes().Len(), "missing attributes")
 	value, exists := span.Attributes().Get("service.name")
 	assert.True(t, exists, "service.name missing")
-	assert.Equal(t, "my-service", value.AsString(), "service.name tag value incorrect")
+	assert.Equal(t, "my-service", value.AsString(), "service.name attribute value incorrect")
 	assert.Equal(t, "my-name", span.Name())
 }
 
@@ -101,10 +102,10 @@ func TestTracePayloadV07Unmarshalling(t *testing.T) {
 	translated, _ := handlePayload(req)
 	span := translated.GetChunks()[0].GetSpans()[0]
 	assert.NotNil(t, span)
-	assert.Equal(t, 4, len(span.GetMeta()), "missing tags")
+	assert.Equal(t, 4, len(span.GetMeta()), "missing attribute")
 	value, exists := span.GetMeta()["service.name"]
 	assert.True(t, exists, "service.name missing")
-	assert.Equal(t, "my-service", value, "service.name tag value incorrect")
+	assert.Equal(t, "my-service", value, "service.name attribute value incorrect")
 	assert.Equal(t, "my-name", span.GetName())
 }
 

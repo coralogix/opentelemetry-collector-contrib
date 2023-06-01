@@ -94,7 +94,7 @@ func (ddr *datadogReceiver) handleTraces(w http.ResponseWriter, req *http.Reques
 		ddr.params.Logger.Error("Unable to unmarshal reqs")
 	}
 
-	otelTraces := toTraces(ddTraces, req)
+	otelTraces := ddr.toTraces(ddTraces, req)
 	spanCount = otelTraces.SpanCount()
 	err = ddr.nextConsumer.ConsumeTraces(obsCtx, otelTraces)
 	if err != nil {
