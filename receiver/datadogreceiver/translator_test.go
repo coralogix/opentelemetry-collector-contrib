@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/DataDog/datadog-agent/pkg/trace/pb"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	vmsgp "github.com/vmihailenco/msgpack/v4"
@@ -57,6 +58,62 @@ var data = [2]interface{}{
 	},
 }
 
+func TestTranslateTracePayloadWithLogData(t *testing.T) {
+	traces := pb.Traces{
+		pb.Trace{
+			&pb.Span{
+				Service:  "tracey",
+				Name:     "__main__.play_game",
+				Resource: "__main__.play_game",
+				TraceID:  15529312076525553051,
+				SpanID:   15109084457746933574,
+				ParentID: 0,
+				Start:    1685944215735137485,
+				Duration: 24043002534,
+				Error:    0,
+				Meta: map[string]string{
+					"_dd.p.dm":              "-0",
+					"language":              "python",
+					"runtime-id":            "5e769a0c78b94796b1c4570ce51fbf3c",
+					"_dd.agent_psr":         "1",
+					"_dd.top_level":         "1",
+					"_dd.tracer_kr":         "1",
+					"_sampling_priority_v1": "1",
+					"process_id":            "1",
+					"span.kind":             "internal",
+					"log":                   "{'timestamp': 1685944215, 'player': 'Mrs Jasmine Burgess', 'message': 'the ball is launched into the air', 'noise': 'thud'}",
+				},
+			},
+		},
+	}
+
+	payload, err := vmsgp.Marshal(&data)
+	assert.NoError(t, err)
+
+	ddr := &datadogReceiver{}
+	req, _ := http.NewRequest(http.MethodPost, "/v0.5/traces", io.NopCloser(bytes.NewReader(payload)))
+
+	translated := ddr.toTraces(&pb.TracerPayload{
+		LanguageName:    req.Header.Get("Datadog-Meta-Lang"),
+		LanguageVersion: req.Header.Get("Datadog-Meta-Lang-Version"),
+		TracerVersion:   req.Header.Get("Datadog-Meta-Tracer-Version"),
+		Chunks:          traceChunksFromTraces(traces),
+	}, req)
+
+	spew.Dump(translated)
+	assert.Equal(t, 1, translated.SpanCount(), "Span Count wrong")
+	span := translated.ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0)
+	assert.NotNil(t, span)
+	assert.Equal(t, 9, span.Attributes().Len(), "missing attributes")
+	assert.Equal(t, "__main__.play_game", span.Name())
+
+	events := translated.ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0).Events()
+
+	assert.Equal(t, 1, events.Len(), "Span Event Count wrong")
+
+	events.At(0).Timestamp()
+}
+
 func TestTracePayloadV05Unmarshalling(t *testing.T) {
 	var traces pb.Traces
 
@@ -64,8 +121,10 @@ func TestTracePayloadV05Unmarshalling(t *testing.T) {
 	assert.NoError(t, err)
 
 	require.NoError(t, traces.UnmarshalMsgDictionary(payload), "Must not error when marshaling content")
+
+	ddr := &datadogReceiver{}
 	req, _ := http.NewRequest(http.MethodPost, "/v0.5/traces", io.NopCloser(bytes.NewReader(payload)))
-	translated := toTraces(&pb.TracerPayload{
+	translated := ddr.toTraces(&pb.TracerPayload{
 		LanguageName:    req.Header.Get("Datadog-Meta-Lang"),
 		LanguageVersion: req.Header.Get("Datadog-Meta-Lang-Version"),
 		TracerVersion:   req.Header.Get("Datadog-Meta-Tracer-Version"),
