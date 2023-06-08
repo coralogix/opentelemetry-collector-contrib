@@ -13,14 +13,12 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/DataDog/datadog-agent/pkg/trace/pb"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	semconv "go.opentelemetry.io/collector/semconv/v1.16.0"
 	"go.uber.org/multierr"
-	"go.uber.org/zap"
 )
 
 const (
@@ -95,46 +93,8 @@ func (ddr *datadogReceiver) toTraces(payload *pb.TracerPayload, req *http.Reques
 			newSpan.Attributes().PutStr("datadog.trace.id", strconv.FormatUint(span.TraceID, 10))
 
 			for k, v := range span.GetMeta() {
-				if k == "log" {
-					var val map[string]interface{}
-					err := json.Unmarshal([]byte(strings.ReplaceAll(v, `'`, `"`)), &val)
-					if err != nil {
-						// on error we add log field as attribute and log the message
-						newSpan.Attributes().PutStr(k, v)
-						ddr.params.Logger.Warn("unable to unmarshal log message", zap.String("message", v), zap.Error(err))
-						continue
-					}
-
-					if ts, ok := val["timestamp"]; ok {
-						unixTs, ok := ts.(float64)
-						if !ok {
-							ddr.params.Logger.Warn("unable to unmarshal timestamp", zap.String("message", v))
-							newSpan.Attributes().PutStr(k, v)
-							continue
-						}
-						event := newSpan.Events().AppendEmpty()
-						event.SetTimestamp(pcommon.NewTimestampFromTime(time.Unix(int64(unixTs), 0)))
-
-						for evK, evV := range val {
-							if evK == "timestamp" {
-								continue
-							}
-							switch v := evV.(type) {
-							case string:
-								event.Attributes().PutStr(evK, v)
-							case float64:
-								event.Attributes().PutDouble(evK, v)
-							case int64:
-								event.Attributes().PutInt(evK, v)
-							case bool:
-								event.Attributes().PutBool(evK, v)
-							}
-						}
-					}
-				} else {
-					if k = translateDataDogKeyToOtel(k); len(k) > 0 {
-						newSpan.Attributes().PutStr(k, v)
-					}
+				if k = translateDataDogKeyToOtel(k); len(k) > 0 {
+					newSpan.Attributes().PutStr(k, v)
 				}
 			}
 
