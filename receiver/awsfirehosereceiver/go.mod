@@ -10,7 +10,7 @@ require (
 	go.opentelemetry.io/collector/consumer v0.78.3-0.20230601234953-deffd4892002
 	go.opentelemetry.io/collector/pdata v1.0.0-rcv0012.0.20230601234953-deffd4892002
 	go.opentelemetry.io/collector/receiver v0.78.3-0.20230601234953-deffd4892002
-	go.opentelemetry.io/collector/semconv v0.78.3-0.20230601234953-deffd4892002
+	go.opentelemetry.io/collector/semconv v0.80.0
 	go.uber.org/zap v1.24.0
 )
 
