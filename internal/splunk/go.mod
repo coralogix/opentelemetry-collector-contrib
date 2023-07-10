@@ -7,7 +7,7 @@ require (
 	go.opentelemetry.io/collector/consumer v0.78.3-0.20230601234953-deffd4892002
 	go.opentelemetry.io/collector/exporter v0.78.3-0.20230601234953-deffd4892002
 	go.opentelemetry.io/collector/pdata v1.0.0-rcv0012.0.20230601234953-deffd4892002
-	go.opentelemetry.io/collector/semconv v0.78.3-0.20230601234953-deffd4892002
+	go.opentelemetry.io/collector/semconv v0.81.0
 	go.uber.org/multierr v1.11.0
 )
 
