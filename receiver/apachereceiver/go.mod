@@ -11,7 +11,7 @@ require (
 	go.opentelemetry.io/collector/component v0.81.0
 	go.opentelemetry.io/collector/config/confighttp v0.81.0
 	go.opentelemetry.io/collector/config/configtls v0.81.0
-	go.opentelemetry.io/collector/confmap v0.81.0
+	go.opentelemetry.io/collector/confmap v0.92.0
 	go.opentelemetry.io/collector/consumer v0.81.0
 	go.opentelemetry.io/collector/pdata v1.0.0-rcv0013
 	go.opentelemetry.io/collector/receiver v0.81.0
@@ -38,6 +38,7 @@ require (
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/uuid v1.3.0 // indirect
+	github.com/hashicorp/go-version v1.6.0 // indirect
 	github.com/imdario/mergo v0.3.15 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/compress v1.16.7 // indirect
@@ -71,14 +72,13 @@ require (
 	go.opentelemetry.io/collector/exporter v0.81.0 // indirect
 	go.opentelemetry.io/collector/extension v0.81.0 // indirect
 	go.opentelemetry.io/collector/extension/auth v0.81.0 // indirect
-	go.opentelemetry.io/collector/featuregate v1.0.0-rcv0013 // indirect
+	go.opentelemetry.io/collector/featuregate v1.0.1 // indirect
 	go.opentelemetry.io/collector/processor v0.81.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.42.0 // indirect
 	go.opentelemetry.io/otel v1.16.0 // indirect
 	go.opentelemetry.io/otel/metric v1.16.0 // indirect
 	go.opentelemetry.io/otel/trace v1.16.0 // indirect
 	go.uber.org/atomic v1.10.0 // indirect
-	go.uber.org/goleak v1.2.1 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/exp v0.0.0-20230510235704-dd950f8aeaea // indirect
 	golang.org/x/net v0.11.0 // indirect
