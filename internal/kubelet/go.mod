@@ -5,7 +5,7 @@ go 1.19
 require (
 	github.com/open-telemetry/opentelemetry-collector-contrib/internal/common v0.81.0
 	github.com/open-telemetry/opentelemetry-collector-contrib/internal/k8sconfig v0.81.0
-	github.com/stretchr/testify v1.8.4
+	github.com/stretchr/testify v1.9.0
 	go.opentelemetry.io/collector/config/configtls v0.81.0
 	go.uber.org/zap v1.24.0
 	k8s.io/client-go v0.27.3
