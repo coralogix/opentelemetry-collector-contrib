@@ -6,7 +6,7 @@ require (
 	github.com/SAP/go-hdb v1.3.9
 	github.com/denisenkom/go-mssqldb v0.12.2
 	github.com/docker/go-connections v0.4.0
-	github.com/go-sql-driver/mysql v1.7.1
+	github.com/go-sql-driver/mysql v1.8.1
 	github.com/lib/pq v1.10.9
 	github.com/open-telemetry/opentelemetry-collector-contrib/extension/storage v0.81.0
 	github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal v0.81.0
@@ -28,6 +28,7 @@ require (
 )
 
 require (
+	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/99designs/go-keychain v0.0.0-20191008050251-8e49817e8af4 // indirect
 	github.com/99designs/keyring v1.2.2 // indirect
 	github.com/Azure/azure-pipeline-go v0.2.3 // indirect
