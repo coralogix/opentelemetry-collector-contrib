@@ -3,11 +3,11 @@ module github.com/open-telemetry/opentelemetry-collector-contrib/internal/splunk
 go 1.19
 
 require (
-	github.com/stretchr/testify v1.8.4
+	github.com/stretchr/testify v1.9.0
 	go.opentelemetry.io/collector/consumer v0.81.0
 	go.opentelemetry.io/collector/exporter v0.81.0
 	go.opentelemetry.io/collector/pdata v1.0.0-rcv0013
-	go.opentelemetry.io/collector/semconv v0.81.0
+	go.opentelemetry.io/collector/semconv v0.98.0
 	go.uber.org/multierr v1.11.0
 )
 
