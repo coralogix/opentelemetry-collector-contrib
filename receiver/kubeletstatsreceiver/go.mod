@@ -6,9 +6,9 @@ require (
 	github.com/google/go-cmp v0.5.9
 	github.com/open-telemetry/opentelemetry-collector-contrib/internal/k8sconfig v0.81.0
 	github.com/open-telemetry/opentelemetry-collector-contrib/internal/kubelet v0.81.0
-	github.com/stretchr/testify v1.8.4
+	github.com/stretchr/testify v1.9.0
 	go.opentelemetry.io/collector/component v0.81.0
-	go.opentelemetry.io/collector/config/confignet v0.81.0
+	go.opentelemetry.io/collector/config/confignet v0.102.1
 	go.opentelemetry.io/collector/config/configtls v0.81.0
 	go.opentelemetry.io/collector/confmap v0.81.0
 	go.opentelemetry.io/collector/consumer v0.81.0
