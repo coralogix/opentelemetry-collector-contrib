@@ -5,7 +5,7 @@ go 1.19
 require (
 	github.com/SAP/go-hdb v1.3.9
 	github.com/denisenkom/go-mssqldb v0.12.2
-	github.com/docker/go-connections v0.4.0
+	github.com/docker/go-connections v0.5.0
 	github.com/go-sql-driver/mysql v1.7.1
 	github.com/lib/pq v1.10.9
 	github.com/open-telemetry/opentelemetry-collector-contrib/extension/storage v0.81.0
