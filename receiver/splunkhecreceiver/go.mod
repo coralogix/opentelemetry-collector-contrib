@@ -10,7 +10,7 @@ require (
 	github.com/open-telemetry/opentelemetry-collector-contrib/internal/sharedcomponent v0.81.0
 	github.com/open-telemetry/opentelemetry-collector-contrib/internal/splunk v0.81.0
 	github.com/open-telemetry/opentelemetry-collector-contrib/pkg/pdatatest v0.81.0
-	github.com/stretchr/testify v1.8.4
+	github.com/stretchr/testify v1.9.0
 	go.opentelemetry.io/collector v0.81.0
 	go.opentelemetry.io/collector/component v0.81.0
 	go.opentelemetry.io/collector/config/confighttp v0.81.0
