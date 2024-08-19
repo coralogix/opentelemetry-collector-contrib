@@ -3,11 +3,11 @@ module github.com/open-telemetry/opentelemetry-collector-contrib/extension/basic
 go 1.19
 
 require (
-	github.com/stretchr/testify v1.8.4
+	github.com/stretchr/testify v1.9.0
 	github.com/tg123/go-htpasswd v1.2.1
 	go.opentelemetry.io/collector v0.81.0
 	go.opentelemetry.io/collector/component v0.81.0
-	go.opentelemetry.io/collector/config/configopaque v0.81.0
+	go.opentelemetry.io/collector/config/configopaque v1.13.0
 	go.opentelemetry.io/collector/confmap v0.81.0
 	go.opentelemetry.io/collector/extension v0.81.0
 	go.opentelemetry.io/collector/extension/auth v0.81.0
