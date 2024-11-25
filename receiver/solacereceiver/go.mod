@@ -7,7 +7,7 @@ go 1.19
 
 require (
 	github.com/Azure/go-amqp v1.0.1
-	github.com/stretchr/testify v1.8.4
+	github.com/stretchr/testify v1.10.0
 	go.opencensus.io v0.24.0
 	go.opentelemetry.io/collector/component v0.81.0
 	go.opentelemetry.io/collector/config/configtls v0.81.0
