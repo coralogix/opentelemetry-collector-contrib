@@ -24,7 +24,7 @@ require (
 	github.com/open-telemetry/opentelemetry-collector-contrib/processor/resourcedetectionprocessor v0.81.0
 	github.com/open-telemetry/opentelemetry-collector-contrib/receiver/filelogreceiver v0.81.0
 	github.com/open-telemetry/opentelemetry-collector-contrib/receiver/hostmetricsreceiver v0.81.0
-	github.com/stretchr/testify v1.8.4
+	github.com/stretchr/testify v1.10.0
 	go.opentelemetry.io/collector v0.81.0
 	go.opentelemetry.io/collector/component v0.81.0
 	go.opentelemetry.io/collector/config/confignet v0.81.0
@@ -38,7 +38,7 @@ require (
 	go.opentelemetry.io/collector/processor/batchprocessor v0.81.0
 	go.opentelemetry.io/collector/receiver v0.81.0
 	go.opentelemetry.io/collector/receiver/otlpreceiver v0.81.0
-	go.opentelemetry.io/collector/semconv v0.81.0
+	go.opentelemetry.io/collector/semconv v0.116.0
 	go.uber.org/multierr v1.11.0
 	go.uber.org/zap v1.24.0
 	google.golang.org/protobuf v1.31.0
@@ -159,7 +159,7 @@ require (
 	github.com/shoenig/go-m1cpu v0.1.6 // indirect
 	github.com/spf13/cobra v1.7.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
-	github.com/stretchr/objx v0.5.0 // indirect
+	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/tinylib/msgp v1.1.8 // indirect
 	github.com/tklauser/go-sysconf v0.3.11 // indirect
 	github.com/tklauser/numcpus v0.6.0 // indirect
