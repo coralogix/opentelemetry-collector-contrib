@@ -4,12 +4,12 @@ go 1.19
 
 require (
 	github.com/google/go-cmp v0.5.9
-	github.com/stretchr/testify v1.8.4
+	github.com/stretchr/testify v1.10.0
 	go.opentelemetry.io/collector/component v0.81.0
 	go.opentelemetry.io/collector/confmap v0.81.0
 	go.opentelemetry.io/collector/pdata v1.0.0-rcv0013
 	go.opentelemetry.io/collector/receiver v0.81.0
-	go.opentelemetry.io/collector/semconv v0.81.0
+	go.opentelemetry.io/collector/semconv v0.116.0
 	go.uber.org/multierr v1.11.0
 	go.uber.org/zap v1.24.0
 	golang.org/x/text v0.10.0
