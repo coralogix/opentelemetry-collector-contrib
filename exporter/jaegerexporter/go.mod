@@ -8,12 +8,12 @@ require (
 	github.com/jaegertracing/jaeger v1.41.0
 	github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal v0.81.0
 	github.com/open-telemetry/opentelemetry-collector-contrib/pkg/translator/jaeger v0.81.0
-	github.com/stretchr/testify v1.8.4
+	github.com/stretchr/testify v1.10.0
 	go.opencensus.io v0.24.0
 	go.opentelemetry.io/collector/component v0.81.0
 	go.opentelemetry.io/collector/config/configgrpc v0.81.0
-	go.opentelemetry.io/collector/config/configopaque v0.81.0
-	go.opentelemetry.io/collector/config/configtls v0.81.0
+	go.opentelemetry.io/collector/config/configopaque v1.22.0
+	go.opentelemetry.io/collector/config/configtls v1.22.0
 	go.opentelemetry.io/collector/confmap v0.81.0
 	go.opentelemetry.io/collector/consumer v0.81.0
 	go.opentelemetry.io/collector/exporter v0.81.0
@@ -26,7 +26,7 @@ require (
 	cloud.google.com/go/compute/metadata v0.2.4-0.20230617002413-005d2dfb6b68 // indirect
 	github.com/apache/thrift v0.18.1 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/fsnotify/fsnotify v1.6.0 // indirect
+	github.com/fsnotify/fsnotify v1.8.0 // indirect
 	github.com/go-logr/logr v1.2.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/gogo/googleapis v1.4.1 // indirect
@@ -67,7 +67,7 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/net v0.11.0 // indirect
 	golang.org/x/oauth2 v0.9.0 // indirect
-	golang.org/x/sys v0.9.0 // indirect
+	golang.org/x/sys v0.14.0 // indirect
 	golang.org/x/text v0.10.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20230530153820-e85fd2cbaebc // indirect
 	google.golang.org/protobuf v1.31.0 // indirect
