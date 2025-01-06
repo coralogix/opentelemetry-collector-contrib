@@ -12,13 +12,12 @@ require (
 	go.opentelemetry.io/collector/confmap v0.81.0
 	go.opentelemetry.io/collector/exporter v0.81.0
 	go.opentelemetry.io/collector/exporter/otlphttpexporter v0.81.0
-	golang.org/x/oauth2 v0.9.0
+	golang.org/x/oauth2 v0.25.0
 	google.golang.org/api v0.129.0
 )
 
 require (
-	cloud.google.com/go/compute v1.19.3 // indirect
-	cloud.google.com/go/compute/metadata v0.2.3 // indirect
+	cloud.google.com/go/compute/metadata v0.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/felixge/httpsnoop v1.0.3 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
