@@ -4,11 +4,11 @@ go 1.19
 
 require (
 	github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal v0.81.0
-	github.com/stretchr/testify v1.8.4
+	github.com/stretchr/testify v1.10.0
 	go.opencensus.io v0.24.0
 	go.opentelemetry.io/collector v0.81.0
 	go.opentelemetry.io/collector/component v0.81.0
-	go.opentelemetry.io/collector/config/configtelemetry v0.81.0
+	go.opentelemetry.io/collector/config/configtelemetry v0.117.0
 	go.opentelemetry.io/collector/confmap v0.81.0
 	go.opentelemetry.io/collector/consumer v0.81.0
 	go.opentelemetry.io/collector/pdata v1.0.0-rcv0013
