@@ -17,7 +17,7 @@ require (
 	go.opentelemetry.io/collector/receiver v0.81.0
 	go.opentelemetry.io/otel v1.16.0
 	go.uber.org/zap v1.24.0
-	google.golang.org/protobuf v1.31.0
+	google.golang.org/protobuf v1.36.2
 )
 
 require (
