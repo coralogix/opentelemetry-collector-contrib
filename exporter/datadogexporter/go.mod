@@ -11,7 +11,7 @@ require (
 	github.com/DataDog/opentelemetry-mapping-go/pkg/otlp/logs v0.5.1
 	github.com/DataDog/opentelemetry-mapping-go/pkg/otlp/metrics v0.5.1
 	github.com/DataDog/opentelemetry-mapping-go/pkg/quantile v0.5.1
-	github.com/DataDog/sketches-go v1.4.2
+	github.com/DataDog/sketches-go v1.4.6
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.15.2
 	github.com/aws/aws-sdk-go v1.44.295
 	github.com/cenkalti/backoff/v4 v4.2.1
@@ -41,7 +41,7 @@ require (
 	go.opentelemetry.io/collector/semconv v0.81.0
 	go.uber.org/multierr v1.11.0
 	go.uber.org/zap v1.24.0
-	google.golang.org/protobuf v1.31.0
+	google.golang.org/protobuf v1.32.0
 	gopkg.in/yaml.v2 v2.4.0
 	gopkg.in/zorkian/go-datadog-api.v2 v2.30.0
 	k8s.io/apimachinery v0.27.3
