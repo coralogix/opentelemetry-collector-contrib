@@ -423,6 +423,7 @@ func DefaultSupervisor() Supervisor {
 			ConfigApplyTimeout:      5 * time.Second,
 			BootstrapTimeout:        3 * time.Second,
 			PassthroughLogs:         false,
+			FallbackStartupTimeout:  30 * time.Second,
 		},
 		Telemetry: Telemetry{
 			Logs: Logs{
