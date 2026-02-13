@@ -1,0 +1,132 @@
+name: opampsupervisor-tests
+on:
+  push:
+    branches: [main]
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+*"
+  merge_group:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    branches:
+      - main
+
+permissions: read-all
+
+env:
+  TEST_RESULTS: testbed/tests/results/junit/results.xml
+  # Make sure to exit early if cache segment download times out after 2 minutes.
+  # We limit cache download as a whole to 5 minutes.
+  SEGMENT_DOWNLOAD_TIMEOUT_MINS: 2
+
+# Do not cancel this workflow on main
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  setup-environment:
+    timeout-minutes: 30
+    runs-on: ubuntu-24.04
+    if: ${{ github.actor != 'dependabot[bot]' }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: ./.github/actions/setup-go-tools
+        with:
+          go-version: oldstable
+      - run: ./.github/workflows/scripts/check-disk-space.sh
+
+  linux-supervisor-tests:
+    runs-on: ubuntu-24.04
+    needs: [setup-environment]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: ./.github/actions/setup-go-tools
+        with:
+          go-version: oldstable
+          install-tools: "false"
+      - name: Run opampsupervisor tests (non-e2e)
+        run: |
+          cd cmd/opampsupervisor
+          go test -v ./...
+      - run: ./.github/workflows/scripts/check-disk-space.sh
+
+  windows-setup-environment:
+    if: ${{ github.actor != 'dependabot[bot]' && (contains(github.event.pull_request.labels.*.name, 'Run Windows') || github.event_name == 'push' || github.event_name == 'merge_group') }}
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [windows-latest, windows-11-arm]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: ./.github/actions/setup-go-tools
+        with:
+          go-version: oldstable
+      - run: ./.github/workflows/scripts/check-disk-space.sh
+
+  windows-supervisor-tests:
+    needs: [windows-setup-environment]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, windows-11-arm]
+    runs-on: ${{ matrix.os }}
+    if: ${{ github.actor != 'dependabot[bot]' && (contains(github.event.pull_request.labels.*.name, 'Run Windows') || github.event_name == 'push' || github.event_name == 'merge_group') }}
+    env:
+      # Limit memory usage via GC environment variables to avoid OOM on GH runners, especially for `cmd/otelcontribcol`,
+      # see https://github.com/open-telemetry/opentelemetry-collector-contrib/pull/28682#issuecomment-1802296776
+      GOGC: 50
+      GOMEMLIMIT: 2GiB
+      # The gcc installed on the Windows arm64 runner doesn't ship native ARM libraries so we need to disable CGO.
+      CGO_ENABLED: ${{ matrix.os == 'windows-11-arm' && '0' || '' }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: ./.github/actions/setup-go-tools
+        with:
+          go-version: oldstable
+      - name: Ensure required ports in the dynamic range are available
+        run: |
+          & ${{ github.workspace }}\.github\workflows\scripts\win-required-ports.ps1
+      - name: Run opampsupervisor tests (non-e2e)
+        run: |
+          cd cmd/opampsupervisor
+          go test -v ./...
+      - run: ./.github/workflows/scripts/check-disk-space.sh
+
+  windows-supervisor-service-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, windows-11-arm]
+    runs-on: ${{ matrix.os }}
+    if: ${{ github.actor != 'dependabot[bot]' && (contains(github.event.pull_request.labels.*.name, 'Run Windows') || github.event_name == 'push' || github.event_name == 'merge_group') }}
+    needs: [windows-setup-environment]
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: ./.github/actions/setup-go-tools
+        with:
+          go-version: oldstable
+      - name: Ensure required ports in the dynamic range are available
+        run: |
+          & ${{ github.workspace }}\.github\workflows\scripts\win-required-ports.ps1
+      - name: Generate otelcontribcol files
+        run: make genotelcontribcol
+      - name: Build Collector
+        run: make otelcontribcol
+      - name: Build supervisor
+        run: cd cmd/opampsupervisor; go build
+      - name: Install supervisor as a service
+        run: |
+          New-Service -Name "opampsupervisor" -StartupType "Manual" -BinaryPathName "`"${PWD}\cmd\opampsupervisor`" --config `"${PWD}\cmd\opampsupervisor\supervisor\testdata\supervisor_windows_service_test_config.yaml`""
+          eventcreate.exe /t information /id 1 /l application /d "Creating event provider for 'opampsupervisor'" /so opampsupervisor
+      - name: Test supervisor service
+        working-directory: ${{ github.workspace }}/cmd/opampsupervisor
+        run: |
+          go test -timeout 90s -run ^TestSupervisorAsService$ -v -tags=win32service
+      - name: Remove opampsupervisor service
+        if: always()
+        run: |
+          Remove-Service opampsupervisor
+          Remove-Item HKLM:\SYSTEM\CurrentControlSet\Services\EventLog\Application\opampsupervisor
+      - run: ./.github/workflows/scripts/check-disk-space.sh

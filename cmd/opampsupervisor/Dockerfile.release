@@ -1,0 +1,15 @@
+FROM alpine:3.23@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659
+RUN apk --update add ca-certificates
+
+ARG SERVICE_NAME=opampsupervisor
+ARG TARGETARCH
+
+RUN addgroup --gid 10001 --system ${SERVICE_NAME} && \
+    adduser --ingroup ${SERVICE_NAME} --shell /bin/false \
+    --disabled-password --uid 10001 ${SERVICE_NAME}
+
+USER ${SERVICE_NAME}
+WORKDIR /home/${SERVICE_NAME}
+
+COPY --chmod=755 opampsupervisor-linux-${TARGETARCH} /usr/local/bin/opampsupervisor
+ENTRYPOINT ["opampsupervisor"]
