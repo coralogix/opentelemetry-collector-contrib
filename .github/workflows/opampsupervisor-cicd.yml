@@ -2,8 +2,10 @@ name: opampsupervisor-image
 
 on:
   push:
+    branches:
+      - main
     tags:
-      - "v[0-9]+.[0-9]+.[0-9]+*"
+      - "cx-opampsupervisor/v[0-9]+.[0-9]+.[0-9]+*"
     paths-ignore:
       - "**/README.md"
   merge_group:
@@ -25,18 +27,60 @@ concurrency:
 permissions: read-all
 
 jobs:
-  build:
+  linux-supervisor-tests:
     runs-on: ubuntu-24.04
     if: ${{ github.actor != 'dependabot[bot]' }}
-    env:
-      SHOULD_PUSH: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
-      IMAGE_TAG: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) && github.ref_name || format('local-{0}', github.run_id) }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - uses: ./.github/actions/setup-go-tools
         with:
           go-version: oldstable
           install-tools: "false"
+      - name: Run opampsupervisor tests (non-e2e)
+        run: |
+          cd cmd/opampsupervisor
+          go test -v ./...
+      - run: ./.github/workflows/scripts/check-disk-space.sh
+
+  supervisor-e2e-tests:
+    runs-on: ubuntu-24.04
+    if: ${{ github.actor != 'dependabot[bot]' }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: ./.github/actions/setup-go-tools
+        with:
+          go-version: oldstable
+          install-tools: "false"
+      - name: Generate otelcontribcol files
+        run: make genotelcontribcol
+      - name: Build Collector
+        run: make otelcontribcol
+      - name: Run opampsupervisor e2e tests
+        run: |
+          cd cmd/opampsupervisor
+          go test -v --tags=e2e
+      - run: ./.github/workflows/scripts/check-disk-space.sh
+
+  build:
+    needs: [linux-supervisor-tests, supervisor-e2e-tests]
+    runs-on: ubuntu-24.04
+    if: ${{ github.actor != 'dependabot[bot]' }}
+    env:
+      SHOULD_PUSH: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/cx-opampsupervisor/v') }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: ./.github/actions/setup-go-tools
+        with:
+          go-version: oldstable
+          install-tools: "false"
+      - name: Determine image tag
+        id: metadata
+        run: |
+          if [[ "${SHOULD_PUSH}" == "true" ]]; then
+            echo "image_tag=${GITHUB_REF_NAME#cx-opampsupervisor/}" >> "$GITHUB_OUTPUT"
+          else
+            echo "image_tag=local-${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
+          fi
       - name: Set up QEMU
         uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
       - name: Set up Docker Buildx
@@ -60,6 +104,6 @@ jobs:
           context: cmd/opampsupervisor
           file: cmd/opampsupervisor/Dockerfile.release
           push: ${{ env.SHOULD_PUSH == 'true' }}
-          tags: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          tags: ${{ env.IMAGE_NAME }}:${{ steps.metadata.outputs.image_tag }}
           platforms: linux/amd64,linux/arm64
       - run: ./.github/workflows/scripts/check-disk-space.sh
