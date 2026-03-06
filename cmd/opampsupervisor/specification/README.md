@@ -143,8 +143,8 @@ agent:
   # Optional user name to drop the privileges to when running the
   # Collector process.
   run_as: myuser
-  # List of configuration files to be merged to build the Collector's effective
-  # configuration. It includes a few "special" files. Read the "Config Files" section
+  # List of configuration sources to be merged to build the Collector's effective
+  # configuration. It includes a few "special" entries. Read the "Config Files" section
   # below for more details.
   config_files:
     - $OPAMP_EXTENSION_CONFIG
@@ -175,13 +175,15 @@ agent:
   # OpAmp extension will connect to
   opamp_server_port:
 
-  # List of paths to fallback configuration files to use when the OpAMP server is
-  # unreachable. If more than one path is specified, they are merged in order.
+  # List of configuration sources to use when the OpAMP server is unreachable.
+  # Plain filesystem paths, explicit file URIs, and supported remote URIs are accepted.
+  # If more than one source is specified, they are merged in order.
   # Together, these must be complete, standalone Collector configuration.
   # The fallback configs are intentionally not merged with config_files to ensure
   # predictable fallback behavior.
   initial_fallback_configs:
   - /etc/otelcol/fallback.yaml
+  - s3://example-bucket.s3.us-east-1.amazonaws.com/fallback/override.yaml
 
 # Supervisor's internal telemetry settings.
 telemetry:
@@ -236,14 +238,21 @@ telemetry:
 #### Notes on `agent::config_files`, `agent::args`, and `agent::env`
 
 Please be aware that when using the `agent::config_files` parameter,
-the configuration files specified are applied in the order they are specified.
-In other words, configuration files are merged from the top of the list to the bottom.
-Configuration added by files at the top of the list may be overwritten by the later ones.
+the configuration sources specified are applied in the order they are specified.
+In other words, entries are merged from the top of the list to the bottom.
+Configuration added by entries at the top of the list may be overwritten by the later ones.
 
-The indicated configuration files are merged in memory and the resulting configuration
+Supported user-provided entries include:
+
+- plain filesystem paths
+- explicit `file:` URIs
+- supported remote URIs such as `s3:`
+- special entries such as `$OPAMP_EXTENSION_CONFIG`, `$OWN_TELEMETRY_CONFIG`, and `$REMOTE_CONFIG`
+
+The indicated configuration sources are merged in memory and the resulting configuration
 is written to `<storage::directory>/effective.yaml`.
 
-There are a few "special" configuration files that can be used to completely
+There are a few "special" configuration entries that can be used to completely
 customize final configuration given to the Collector. Below are the available
 values and what they represent:
 
@@ -253,7 +262,7 @@ values and what they represent:
 
 **NOTE**: These configuration snippets, particularly `$OPAMP_EXTENSION_CONFIG`, are essential for the Supervisor and Collector to work together. Overriding values in these may result in the Supervisor failing to properly start the Collector and should be done with caution.
 
-These special files can be mixed with user-provided configuration files to create complex
+These special entries can be mixed with user-provided configuration sources to create complex
 configuration merge orders, for instance, creating base-layer configuration at the
 lowest priority while keeping compliance configuration at the highest priority:
 
@@ -267,6 +276,16 @@ agent:
     - compliance_config.yaml
 ```
 
+For example, local and remote sources can be combined:
+
+```yaml
+agent:
+  config_files:
+    - ./base.yaml
+    - file:/etc/otelcol/local-override.yaml
+    - s3://example-bucket.s3.us-east-1.amazonaws.com/collector/remote-override.yaml
+```
+
 If **one or more** of the special files are not specified, they are automatically
 added at predetermined positions in the list. The order is as follows:
 
@@ -275,7 +294,7 @@ added at predetermined positions in the list. The order is as follows:
 - `$OPAMP_EXTENSION_CONFIG`
 - `$REMOTE_CONFIG`
 
-Arguments present in `agent::args` are passed to the executable binary **after** the configuration files.
+Arguments present in `agent::args` are passed to the executable binary **after** the effective configuration file is selected.
 The environment variables specified in `agent::env` are set in the Collector process environment.
 
 Take the configuration below as an example:
@@ -326,7 +345,7 @@ fallback configurations, the Supervisor automatically switches back to the regul
 configuration (indicated by `agent::config_files`) and any potential remote configuration
 received from the OpAMP server.
 
-Note that the fallback configurations are intentionally a standalone configuration files
+Note that the fallback configurations are intentionally standalone configuration sources
 and is not merged with the `agent::config_files` setting. This ensures predictable fallback
 behavior without dependencies on other configuration files. The OpAMP extension
 configuration is automatically added to maintain Supervisor-Collector communication.
