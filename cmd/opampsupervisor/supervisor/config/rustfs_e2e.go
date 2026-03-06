@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	rustFSImage     = "rustfs/rustfs:latest"
+	rustFSImage     = "rustfs/rustfs@sha256:35c522d3926bfb3129eb9a9eb8c3431367d15366c63d973987a827a213ee7954"
 	rustFSRegion    = "us-east-1"
 	rustFSAccessKey = "opampsupervisor-test-access"
 	rustFSSecretKey = "opampsupervisor-test-secret"
