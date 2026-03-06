@@ -177,8 +177,8 @@ agent:
 
   # List of configuration sources to use when the OpAMP server is unreachable.
   # Plain filesystem paths, explicit file URIs, and supported remote URIs are accepted.
-  # If more than one source is specified, they are merged in order.
-  # Together, these must be complete, standalone Collector configuration.
+  # The Supervisor uses the first source it can read successfully.
+  # Each source must be a complete, standalone Collector configuration.
   # The fallback configs are intentionally not merged with config_files to ensure
   # predictable fallback behavior.
   initial_fallback_configs:
@@ -337,8 +337,8 @@ configuration option. The Supervisor will validate the configurations
 using the binary indicated by the `agent::executable` via the `validate` subcommand
 to ensure that they are valid configurations.
 
-If more than one initial fallback configurations are specified, the Supervisor
-will merge them in order.
+If more than one initial fallback configuration is specified, the Supervisor
+will try them in order and use the first one it can read successfully.
 
 **Recovery**: When the connection to the OpAMP server is restored after using the
 fallback configurations, the Supervisor automatically switches back to the regular

@@ -5,6 +5,7 @@ package config
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -141,6 +142,32 @@ func RetrieveURIAsConf(uri string, logger *zap.Logger) (*confmap.Conf, error) {
 	}()
 
 	return retrieved.AsConf()
+}
+
+// RetrieveFirstReadableURIAsConf returns the first URI that can be retrieved as a Conf.
+// Unreadable URIs are skipped so callers can provide ordered fallback sources.
+func RetrieveFirstReadableURIAsConf(uris []string, logger *zap.Logger) (*confmap.Conf, string, error) {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+
+	var lastErr error
+	for _, uri := range uris {
+		conf, err := RetrieveURIAsConf(uri, logger)
+		if err != nil {
+			lastErr = err
+			logger.Warn("Could not read config source, trying next", zap.String("uri", uri), zap.Error(err))
+			continue
+		}
+
+		return conf, uri, nil
+	}
+
+	if lastErr != nil {
+		return nil, "", fmt.Errorf("could not read any config source: %w", lastErr)
+	}
+
+	return nil, "", errors.New("no config sources provided")
 }
 
 // NewConfFromYAML parses YAML bytes into a confmap.Conf.

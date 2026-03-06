@@ -1513,8 +1513,8 @@ func (s *Supervisor) composeMergedConfig(incomingConfig *protobufs.AgentRemoteCo
 	return configChanged, nil
 }
 
-// composeFallbackConfig composes the agent configuration using the fallback config files
-// (merged in order) instead of the remote config. This is used when the OpAMP server is unreachable.
+// composeFallbackConfig composes the agent configuration using the first readable fallback
+// config source instead of the remote config. This is used when the OpAMP server is unreachable.
 func (s *Supervisor) composeFallbackConfig() (configChanged bool, err error) {
 	conf := confmap.New()
 
@@ -1524,16 +1524,13 @@ func (s *Supervisor) composeFallbackConfig() (configChanged bool, err error) {
 		return false, errors.New("no fallback configs configured")
 	}
 
-	// Load and merge fallback config files, in order.
-	for _, fallbackPath := range s.config.Agent.InitialFallbackConfigs {
-		fallbackConfig, resolveErr := config.RetrieveURIAsConf(fallbackPath, s.telemetrySettings.Logger)
-		if resolveErr != nil {
-			return false, fmt.Errorf("could not load fallback config: %w", resolveErr)
-		}
+	fallbackConfig, _, err := config.RetrieveFirstReadableURIAsConf(s.config.Agent.InitialFallbackConfigs, s.telemetrySettings.Logger)
+	if err != nil {
+		return false, fmt.Errorf("could not load fallback config: %w", err)
+	}
 
-		if err = config.MergeConf(conf, fallbackConfig); err != nil {
-			return false, fmt.Errorf("could not load fallback config: %w", err)
-		}
+	if err = config.MergeConf(conf, fallbackConfig); err != nil {
+		return false, fmt.Errorf("could not load fallback config: %w", err)
 	}
 
 	// Add the OpAMP extension config

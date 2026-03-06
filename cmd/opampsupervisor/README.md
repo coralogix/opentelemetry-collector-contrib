@@ -148,7 +148,7 @@ agent:
 
 | Option | Description |
 |--------|-------------|
-| `initial_fallback_configs` | List of supported config sources to use for the initial fallback configuration. Plain filesystem paths, explicit `file:` URIs, and supported remote URIs such as `s3:` are accepted. If more than one entry is specified, they are merged in order. Together, these must be complete, standalone Collector configuration. |
+| `initial_fallback_configs` | Ordered list of supported config sources to try for the initial fallback configuration. Plain filesystem paths, explicit `file:` URIs, and supported remote URIs such as `s3:` are accepted. The Supervisor uses the first entry it can read successfully and ignores the rest. Each entry must be a complete, standalone Collector configuration. |
 
 ### Important Notes
 

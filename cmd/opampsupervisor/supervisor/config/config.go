@@ -24,7 +24,6 @@ import (
 	"go.opentelemetry.io/collector/config/configopaque"
 	"go.opentelemetry.io/collector/config/configtelemetry"
 	"go.opentelemetry.io/collector/config/configtls"
-	"go.opentelemetry.io/collector/confmap"
 	"go.opentelemetry.io/collector/service/telemetry/otelconftelemetry"
 	config "go.opentelemetry.io/contrib/otelconf/v0.3.0"
 	"go.uber.org/zap"
@@ -208,8 +207,8 @@ type Agent struct {
 	ConfigFiles             []string          `mapstructure:"config_files"`
 	Arguments               []string          `mapstructure:"args"`
 	Env                     map[string]string `mapstructure:"env"`
-	// InitialFallbackConfigs is an ordered list of fallback configuration files to use
-	// when the OpAMP server is unreachable. Configs are merged in order.
+	// InitialFallbackConfigs is an ordered list of fallback configuration sources to try
+	// when the OpAMP server is unreachable. The first readable source is used.
 	InitialFallbackConfigs []string `mapstructure:"initial_fallback_configs"`
 }
 
@@ -279,20 +278,14 @@ func (a Agent) validateFallbackConfigs() error {
 }
 
 func (a Agent) validateFallbackConfigsWithColBin() error {
-	conf := confmap.New()
-	for i, cfgURI := range a.InitialFallbackConfigs {
-		incoming, err := RetrieveURIAsConf(cfgURI, zap.NewNop())
-		if err != nil {
-			return fmt.Errorf("could not load agent::initial_fallback_configs[%d] URI %q: %w", i, cfgURI, err)
-		}
-		if err := MergeConf(conf, incoming); err != nil {
-			return fmt.Errorf("could not merge agent::initial_fallback_configs[%d] URI %q: %w", i, cfgURI, err)
-		}
+	selectedConf, _, err := RetrieveFirstReadableURIAsConf(a.InitialFallbackConfigs, zap.NewNop())
+	if err != nil {
+		return fmt.Errorf("could not load any agent::initial_fallback_configs entry: %w", err)
 	}
 
-	mergedConfig, err := MarshalConfToYAML(conf)
+	mergedConfig, err := MarshalConfToYAML(selectedConf)
 	if err != nil {
-		return fmt.Errorf("could not marshal merged fallback configs: %w", err)
+		return fmt.Errorf("could not marshal selected fallback config: %w", err)
 	}
 
 	tmpCfgFile, err := os.CreateTemp("", "opampsupervisor-fallback-*.yaml")
