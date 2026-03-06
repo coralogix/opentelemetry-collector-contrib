@@ -143,15 +143,16 @@ The following options can be configured under the `agent` section:
 agent:
   initial_fallback_configs:
   - /path/to/fallback_config.yaml
+  - s3://example-bucket.s3.us-east-1.amazonaws.com/fallback/override.yaml
 ```
 
 | Option | Description |
 |--------|-------------|
-| `initial_fallback_configs` | List of paths to initial fallback configuration files to use. If more than one path is specified, they are merged in order. Together, these must be complete, standalone Collector configuration. |
+| `initial_fallback_configs` | Ordered list of supported config sources to try for the initial fallback configuration. Plain filesystem paths, explicit `file:` URIs, and supported remote URIs such as `s3:` are accepted. The Supervisor uses the first entry it can read successfully and ignores the rest. Each entry must be a complete, standalone Collector configuration. |
 
 ### Important Notes
 
-- The initial fallback configuration is a set of **standalone configuration files**. It is intentionally not merged with the `agent::config_files` setting. This ensures predictable behavior without dependencies on other configuration files.
+- The initial fallback configuration is a set of **standalone configuration sources**. It is intentionally not merged with the `agent::config_files` setting. This ensures predictable behavior without dependencies on other configuration files.
 
 - The OpAMP extension and "own telemetry" configuration are automatically added to the fallback configuration. This maintains the Collector's own telemetry flowing and the communication between Supervisor and Collector.
 

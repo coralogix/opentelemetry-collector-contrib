@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -22,9 +23,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/knadh/koanf/parsers/yaml"
-	"github.com/knadh/koanf/providers/rawbytes"
-	"github.com/knadh/koanf/v2"
 	"github.com/open-telemetry/opamp-go/client"
 	"github.com/open-telemetry/opamp-go/client/types"
 	"github.com/open-telemetry/opamp-go/protobufs"
@@ -147,6 +145,10 @@ func newNopTelemetrySettings() telemetrySettings {
 	}
 }
 
+func fileURIFromPath(filePath string) string {
+	return (&url.URL{Scheme: "file", Path: filepath.ToSlash(filePath)}).String()
+}
+
 func Test_NewSupervisor(t *testing.T) {
 	cfg := setupSupervisorConfig(t, configTemplate)
 	supervisor, err := NewSupervisor(t.Context(), zap.L(), cfg)
@@ -212,6 +214,7 @@ service:
 	tests := []struct {
 		name                string
 		configFiles         []string
+		useFileURI          bool
 		acceptsRemoteConfig bool
 		remoteConfig        *protobufs.AgentRemoteConfig
 		wantErr             bool
@@ -221,6 +224,22 @@ service:
 		{
 			name:                "can accept remote config, receives one",
 			configFiles:         []string{"testdata/local_config1.yaml", "testdata/local_config2.yaml"},
+			acceptsRemoteConfig: true,
+			remoteConfig: &protobufs.AgentRemoteConfig{
+				Config: &protobufs.AgentConfigMap{
+					ConfigMap: map[string]*protobufs.AgentConfigFile{
+						"": {Body: []byte(fileLogConfig)},
+					},
+				},
+			},
+			wantErr:     false,
+			wantChanged: true,
+			wantConfig:  effectiveConfig,
+		},
+		{
+			name:                "can accept remote config, receives one, local config via file URI",
+			configFiles:         []string{"testdata/local_config1.yaml", "testdata/local_config2.yaml"},
+			useFileURI:          true,
 			acceptsRemoteConfig: true,
 			remoteConfig: &protobufs.AgentRemoteConfig{
 				Config: &protobufs.AgentConfigMap{
@@ -270,12 +289,24 @@ service:
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			configFiles := append([]string(nil), tt.configFiles...)
+			if tt.useFileURI {
+				for i, file := range configFiles {
+					if strings.HasPrefix(file, "$") {
+						continue
+					}
+					absPath, err := filepath.Abs(file)
+					require.NoError(t, err)
+					configFiles[i] = fileURIFromPath(absPath)
+				}
+			}
+
 			s := Supervisor{
 				telemetrySettings: newNopTelemetrySettings(),
 				persistentState:   &persistentState{},
 				config: config.Supervisor{
 					Capabilities: config.Capabilities{AcceptsRemoteConfig: tt.acceptsRemoteConfig},
-					Agent:        config.Agent{ConfigFiles: tt.configFiles},
+					Agent:        config.Agent{ConfigFiles: configFiles},
 					Storage:      config.Storage{Directory: t.TempDir()},
 				},
 				pidProvider:                    staticPIDProvider(1234),
@@ -308,11 +339,10 @@ service:
 			require.Equal(t, tt.wantChanged, changed)
 			got := s.cfgState.Load().(*configState).mergedConfig
 
-			k := koanf.New("::")
-			err = k.Load(rawbytes.Provider(tt.wantConfig), yaml.Parser(), koanf.WithMergeFunc(configMergeFunc))
+			wantConf, err := config.NewConfFromYAML(tt.wantConfig)
 			require.NoError(t, err)
 
-			gotParsed, err := k.Marshal(yaml.Parser())
+			gotParsed, err := config.MarshalConfToYAML(wantConf)
 
 			require.NoError(t, err)
 			require.Equal(t, string(gotParsed), got)
@@ -2399,6 +2429,7 @@ service:
 	tests := []struct {
 		name               string
 		fallbackConfig     string
+		useExplicitFileURI bool
 		ownTelemetryConfig string
 		wantErr            bool
 		wantErrContains    string
@@ -2411,6 +2442,14 @@ service:
 			wantErr:        false,
 			wantChanged:    true,
 			wantConfig:     expectedMergedConfig,
+		},
+		{
+			name:               "fallback config loaded from file URI",
+			fallbackConfig:     fallbackConfigInput,
+			useExplicitFileURI: true,
+			wantErr:            false,
+			wantChanged:        true,
+			wantConfig:         expectedMergedConfig,
 		},
 		{
 			name:               "fallback config with own telemetry merged",
@@ -2433,6 +2472,10 @@ service:
 		t.Run(tt.name, func(t *testing.T) {
 			fallbackConfigPath := filepath.Join(t.TempDir(), "fallback_config.yaml")
 			require.NoError(t, os.WriteFile(fallbackConfigPath, []byte(tt.fallbackConfig), 0o600))
+			fallbackConfigRef := fallbackConfigPath
+			if tt.useExplicitFileURI {
+				fallbackConfigRef = fileURIFromPath(fallbackConfigPath)
+			}
 
 			s := Supervisor{
 				telemetrySettings: newNopTelemetrySettings(),
@@ -2443,7 +2486,7 @@ service:
 						Directory: t.TempDir(),
 					},
 					Agent: config.Agent{
-						InitialFallbackConfigs: []string{fallbackConfigPath},
+						InitialFallbackConfigs: []string{fallbackConfigRef},
 					},
 				},
 				hasNewConfig:                   make(chan struct{}, 1),
@@ -2518,7 +2561,7 @@ service:
 
 		configChanged, err := s.composeFallbackConfig()
 		require.Error(t, err)
-		require.ErrorContains(t, err, "could not read fallback config file")
+		require.ErrorContains(t, err, "could not load fallback config")
 		require.False(t, configChanged)
 	})
 
@@ -2571,51 +2614,11 @@ service:
 		require.False(t, configChanged)
 	})
 
-	t.Run("multiple fallback configs are merged in order", func(t *testing.T) {
-		// Base config defines exporters list as [nop], override changes it to [logging].
-		// Koanf overrides lists by default (except service.extensions via configMergeFunc),
-		// so this validates later fallback configs override earlier ones.
+	t.Run("uses the first readable fallback config only", func(t *testing.T) {
 		basePath := filepath.Join(t.TempDir(), "fallback_base.yaml")
 		overridePath := filepath.Join(t.TempDir(), "fallback_override.yaml")
 		require.NoError(t, os.WriteFile(basePath, []byte(fallbackBaseConfigInput), 0o600))
 		require.NoError(t, os.WriteFile(overridePath, []byte(fallbackOverrideConfigInput), 0o600))
-
-		const expectedMergedConfigMulti = `exporters:
-    logging: null
-    nop: null
-extensions:
-    opamp:
-        capabilities:
-            reports_available_components: false
-        instance_uid: 018fee23-4a51-7303-a441-73faed7d9deb
-        ppid: 1234
-        ppid_poll_interval: 5s
-        server:
-            ws:
-                endpoint: ws://127.0.0.1:0/v1/opamp
-                tls:
-                    insecure: true
-receivers:
-    nop: null
-service:
-    extensions:
-        - opamp
-    pipelines:
-        logs:
-            exporters:
-                - logging
-            receivers:
-                - nop
-    telemetry:
-        logs:
-            encoding: json
-            error_output_paths:
-                - stderr
-            output_paths:
-                - stdout
-        resource:
-            service.name: otelcol
-`
 
 		s := Supervisor{
 			telemetrySettings: newNopTelemetrySettings(),
@@ -2658,6 +2661,57 @@ service:
 		cfgState := s.cfgState.Load().(*configState)
 		require.NotNil(t, cfgState)
 		gotConfig := strings.ReplaceAll(cfgState.mergedConfig, "\r\n", "\n")
-		require.Equal(t, expectedMergedConfigMulti, gotConfig)
+		require.Equal(t, expectedMergedConfig, gotConfig)
+	})
+
+	t.Run("skips unreadable fallback configs before using the first readable one", func(t *testing.T) {
+		missingPath := filepath.Join(t.TempDir(), "missing.yaml")
+		fallbackConfigPath := filepath.Join(t.TempDir(), "fallback_config.yaml")
+		laterPath := filepath.Join(t.TempDir(), "fallback_later.yaml")
+		require.NoError(t, os.WriteFile(fallbackConfigPath, []byte(fallbackConfigInput), 0o600))
+		require.NoError(t, os.WriteFile(laterPath, []byte(fallbackOverrideConfigInput), 0o600))
+
+		s := Supervisor{
+			telemetrySettings: newNopTelemetrySettings(),
+			persistentState:   &persistentState{InstanceID: testUUID},
+			pidProvider:       staticPIDProvider(1234),
+			config: config.Supervisor{
+				Storage: config.Storage{
+					Directory: t.TempDir(),
+				},
+				Agent: config.Agent{
+					InitialFallbackConfigs: []string{missingPath, fallbackConfigPath, laterPath},
+				},
+			},
+			hasNewConfig:                   make(chan struct{}, 1),
+			agentConfigOwnTelemetrySection: &atomic.Value{},
+			cfgState:                       &atomic.Value{},
+		}
+
+		agentDesc := &atomic.Value{}
+		agentDesc.Store(&protobufs.AgentDescription{
+			IdentifyingAttributes: []*protobufs.KeyValue{
+				{
+					Key: "service.name",
+					Value: &protobufs.AnyValue{
+						Value: &protobufs.AnyValue_StringValue{
+							StringValue: "otelcol",
+						},
+					},
+				},
+			},
+		})
+		s.agentDescription = agentDesc
+
+		require.NoError(t, s.createTemplates())
+
+		configChanged, err := s.composeFallbackConfig()
+		require.NoError(t, err)
+		require.True(t, configChanged)
+
+		cfgState := s.cfgState.Load().(*configState)
+		require.NotNil(t, cfgState)
+		gotConfig := strings.ReplaceAll(cfgState.mergedConfig, "\r\n", "\n")
+		require.Equal(t, expectedMergedConfig, gotConfig)
 	})
 }

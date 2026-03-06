@@ -26,12 +26,12 @@ agent:
   # Path to the Collector executable
   executable: /opt/otelcol/bin/otelcol
 
-  # Fallback configuration file to use when OpAMP server is unreachable.
-  # This must be a complete, standalone Collector configuration.
-  # Note: This is NOT merged with config_files - it's used as-is when fallback is triggered.
+  # Ordered fallback configuration sources to try when the OpAMP server is unreachable.
+  # The Supervisor uses the first source it can read successfully.
+  # Each entry must be a complete, standalone Collector configuration.
+  # Note: The selected fallback config is NOT merged with config_files.
   initial_fallback_configs:
   - /etc/otelcol/fallback.yaml
 
 storage:
   directory: /var/lib/otelcol/supervisor
-

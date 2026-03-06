@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -555,6 +556,98 @@ func TestOpAMPServer_OpaqueHeaders(t *testing.T) {
 			require.Equal(t, tc.expected, actual)
 		})
 	}
+}
+
+func TestAgent_validateFallbackConfigsWithColBin(t *testing.T) {
+	t.Run("uses the first readable fallback config", func(t *testing.T) {
+		validateStub := writeValidateStub(t, "nop:", "logging:")
+		firstPath := writeFallbackConfig(t, "first.yaml", "exporters:\n  nop:\n")
+		secondPath := writeFallbackConfig(t, "second.yaml", "exporters:\n  logging:\n")
+
+		agent := Agent{
+			Executable:             validateStub,
+			InitialFallbackConfigs: []string{firstPath, secondPath},
+		}
+
+		require.NoError(t, agent.validateFallbackConfigsWithColBin())
+	})
+
+	t.Run("skips unreadable entries before the first readable fallback config", func(t *testing.T) {
+		validateStub := writeValidateStub(t, "nop:", "logging:")
+		missingPath := filepath.Join(t.TempDir(), "missing.yaml")
+		firstReadable := writeFallbackConfig(t, "first-readable.yaml", "exporters:\n  nop:\n")
+		laterReadable := writeFallbackConfig(t, "later-readable.yaml", "exporters:\n  logging:\n")
+
+		agent := Agent{
+			Executable:             validateStub,
+			InitialFallbackConfigs: []string{missingPath, firstReadable, laterReadable},
+		}
+
+		require.NoError(t, agent.validateFallbackConfigsWithColBin())
+	})
+
+	t.Run("errors when no fallback config can be read", func(t *testing.T) {
+		validateStub := writeValidateStub(t, "nop:", "")
+		tempDir := t.TempDir()
+
+		agent := Agent{
+			Executable: validateStub,
+			InitialFallbackConfigs: []string{
+				filepath.Join(tempDir, "missing-1.yaml"),
+				filepath.Join(tempDir, "missing-2.yaml"),
+			},
+		}
+
+		err := agent.validateFallbackConfigsWithColBin()
+		require.ErrorContains(t, err, "could not load any agent::initial_fallback_configs entry")
+	})
+}
+
+func writeFallbackConfig(t *testing.T, fileName, contents string) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), fileName)
+	require.NoError(t, os.WriteFile(path, []byte(contents), 0o600))
+
+	return path
+}
+
+func writeValidateStub(t *testing.T, requiredSubstring, forbiddenSubstring string) string {
+	t.Helper()
+
+	tempDir := t.TempDir()
+	if runtime.GOOS == "windows" {
+		path := filepath.Join(tempDir, "validate-stub.bat")
+		script := []string{
+			"@echo off",
+			"set CFG=%3",
+			"findstr /C:\"" + requiredSubstring + "\" \"%CFG%\" >nul",
+			"if errorlevel 1 exit /b 1",
+		}
+		if forbiddenSubstring != "" {
+			script = append(script,
+				"findstr /C:\""+forbiddenSubstring+"\" \"%CFG%\" >nul",
+				"if not errorlevel 1 exit /b 1",
+			)
+		}
+		script = append(script, "exit /b 0")
+		require.NoError(t, os.WriteFile(path, []byte(strings.Join(script, "\r\n")+"\r\n"), 0o600))
+		return path
+	}
+
+	path := filepath.Join(tempDir, "validate-stub.sh")
+	script := []string{
+		"#!/bin/sh",
+		"cfg=\"$3\"",
+		"grep -q '" + requiredSubstring + "' \"$cfg\" || exit 1",
+	}
+	if forbiddenSubstring != "" {
+		script = append(script, "grep -q '"+forbiddenSubstring+"' \"$cfg\" && exit 1")
+	}
+	script = append(script, "exit 0")
+	require.NoError(t, os.WriteFile(path, []byte(strings.Join(script, "\n")+"\n"), 0o700))
+
+	return path
 }
 
 func TestCapabilities_SupportedCapabilities(t *testing.T) {
