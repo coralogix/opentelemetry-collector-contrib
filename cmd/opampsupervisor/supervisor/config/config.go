@@ -4,7 +4,6 @@
 package config
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -26,10 +25,9 @@ import (
 	"go.opentelemetry.io/collector/config/configtelemetry"
 	"go.opentelemetry.io/collector/config/configtls"
 	"go.opentelemetry.io/collector/confmap"
-	"go.opentelemetry.io/collector/confmap/provider/envprovider"
-	"go.opentelemetry.io/collector/confmap/provider/fileprovider"
 	"go.opentelemetry.io/collector/service/telemetry/otelconftelemetry"
 	config "go.opentelemetry.io/contrib/otelconf/v0.3.0"
+	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
 
@@ -49,22 +47,7 @@ func Load(configFile string) (Supervisor, error) {
 		return Supervisor{}, errors.New("path to config file cannot be empty")
 	}
 
-	resolverSettings := confmap.ResolverSettings{
-		URIs: []string{configFile},
-		ProviderFactories: []confmap.ProviderFactory{
-			fileprovider.NewFactory(),
-			envprovider.NewFactory(),
-		},
-		ConverterFactories: []confmap.ConverterFactory{},
-		DefaultScheme:      "env",
-	}
-
-	resolver, err := confmap.NewResolver(resolverSettings)
-	if err != nil {
-		return Supervisor{}, err
-	}
-
-	conf, err := resolver.Resolve(context.Background())
+	conf, err := ResolveURI(configFile)
 	if err != nil {
 		return Supervisor{}, err
 	}
@@ -287,9 +270,6 @@ func (a Agent) validateFallbackConfigs() error {
 		if cfgPath == "" {
 			return fmt.Errorf("agent::initial_fallback_configs[%d] cannot be empty", i)
 		}
-		if _, err := os.Stat(cfgPath); err != nil {
-			return fmt.Errorf("could not stat agent::initial_fallback_configs[%d] path %q: %w", i, cfgPath, err)
-		}
 	}
 	if err := a.validateFallbackConfigsWithColBin(); err != nil {
 		return fmt.Errorf("could not validate initial fallback configs with agent::executable: %w", err)
@@ -299,15 +279,45 @@ func (a Agent) validateFallbackConfigs() error {
 }
 
 func (a Agent) validateFallbackConfigsWithColBin() error {
-	cfgValidateCommand := []string{a.Executable, "validate"}
-	for _, cfgPath := range a.InitialFallbackConfigs {
-		cfgValidateCommand = append(cfgValidateCommand, "--config", cfgPath)
+	conf := confmap.New()
+	for i, cfgURI := range a.InitialFallbackConfigs {
+		incoming, err := RetrieveURIAsConf(cfgURI, zap.NewNop())
+		if err != nil {
+			return fmt.Errorf("could not load agent::initial_fallback_configs[%d] URI %q: %w", i, cfgURI, err)
+		}
+		if err := MergeConf(conf, incoming); err != nil {
+			return fmt.Errorf("could not merge agent::initial_fallback_configs[%d] URI %q: %w", i, cfgURI, err)
+		}
 	}
+
+	mergedConfig, err := MarshalConfToYAML(conf)
+	if err != nil {
+		return fmt.Errorf("could not marshal merged fallback configs: %w", err)
+	}
+
+	tmpCfgFile, err := os.CreateTemp("", "opampsupervisor-fallback-*.yaml")
+	if err != nil {
+		return fmt.Errorf("could not create temp fallback config file: %w", err)
+	}
+	tmpCfgPath := tmpCfgFile.Name()
+	defer func() {
+		_ = os.Remove(tmpCfgPath)
+	}()
+
+	if _, err = tmpCfgFile.Write(mergedConfig); err != nil {
+		_ = tmpCfgFile.Close()
+		return fmt.Errorf("could not write temp fallback config file: %w", err)
+	}
+	if err = tmpCfgFile.Close(); err != nil {
+		return fmt.Errorf("could not close temp fallback config file: %w", err)
+	}
+
+	cfgValidateCommand := []string{a.Executable, "validate", "--config", tmpCfgPath}
 	cmd := exec.Command(cfgValidateCommand[0], cfgValidateCommand[1:]...) // #nosec G204
 
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	err := cmd.Run()
+	err = cmd.Run()
 	if err != nil {
 		return err
 	}

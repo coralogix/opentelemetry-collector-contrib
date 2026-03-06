@@ -31,16 +31,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/knadh/koanf/parsers/yaml"
-	"github.com/knadh/koanf/providers/file"
-	"github.com/knadh/koanf/providers/rawbytes"
-	"github.com/knadh/koanf/v2"
 	clientTypes "github.com/open-telemetry/opamp-go/client/types"
 	"github.com/open-telemetry/opamp-go/protobufs"
 	"github.com/open-telemetry/opamp-go/server"
 	"github.com/open-telemetry/opamp-go/server/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/collector/confmap"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -781,6 +778,77 @@ func TestSupervisorStartsCollectorWithRemoteConfigAndExecParams(t *testing.T) {
 	}, 20*time.Second, 500*time.Millisecond, "Log never appeared in output")
 }
 
+func TestSupervisorStartsCollectorWithFileAndS3ConfigSources(t *testing.T) {
+	storageDir := t.TempDir()
+
+	rustFS := config.StartRustFS(t)
+
+	s3Bucket := fmt.Sprintf("opampsupervisor-%s", strings.ReplaceAll(uuid.NewString(), "-", ""))
+	s3Key := "configs/collector_extension.yaml"
+
+	s3HealthcheckPort, err := findRandomPort()
+	require.NoError(t, err)
+
+	s3Config := []byte(fmt.Sprintf(`
+extensions:
+  health_check/s3:
+    endpoint: "localhost:%d"
+
+service:
+  extensions: [health_check/s3]
+`, s3HealthcheckPort))
+	rustFS.UploadObject(t, s3Bucket, s3Key, s3Config)
+	rustFS.SetTestEnv(t)
+
+	server := newOpAMPServer(
+		t,
+		defaultConnectingHandler,
+		types.ConnectionCallbacks{},
+	)
+
+	inputFile, err := os.CreateTemp(storageDir, "input.log")
+	require.NoError(t, err)
+	t.Cleanup(func() { inputFile.Close() })
+
+	outputFile, err := os.CreateTemp(storageDir, "output.log")
+	require.NoError(t, err)
+	t.Cleanup(func() { outputFile.Close() })
+
+	fileHealthcheckPort, err := findRandomPort()
+	require.NoError(t, err)
+
+	s3ConfigURI := rustFS.S3URI(s3Bucket, s3Key)
+	s, _ := newSupervisor(t, "exec_config_file_s3", map[string]string{
+		"url":             server.addr,
+		"storage_dir":     storageDir,
+		"inputLogFile":    inputFile.Name(),
+		"outputLogFile":   outputFile.Name(),
+		"healthcheckPort": strconv.Itoa(fileHealthcheckPort),
+		"s3ConfigURI":     s3ConfigURI,
+	})
+
+	require.Nil(t, s.Start(t.Context()))
+	defer s.Shutdown()
+
+	waitForSupervisorConnection(server.supervisorConnected, true)
+
+	for _, port := range []int{fileHealthcheckPort, s3HealthcheckPort} {
+		require.Eventually(t, func() bool {
+			return healthCheckOK(port)
+		}, 10*time.Second, 250*time.Millisecond, "Healthcheck endpoint is not available")
+	}
+
+	n, err := inputFile.WriteString("{\"body\":\"hello from mixed file+s3 config\"}\n")
+	require.NotZero(t, n, "Could not write to input file")
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		logRecord := make([]byte, 1024)
+		n, _ := outputFile.Read(logRecord)
+		return n != 0
+	}, 20*time.Second, 500*time.Millisecond, "Log never appeared in output")
+}
+
 func TestSupervisorStartsWithNoOpAMPServer(t *testing.T) {
 	cfg, hash, inputFile, outputFile := createSimplePipelineCollectorConf(t)
 
@@ -1028,14 +1096,12 @@ func TestSupervisorBootstrapsCollector(t *testing.T) {
 
 			// Load the Supervisor config so we can get the location of
 			// the Collector that will be run.
-			var cfg config.Supervisor
 			cfgFile := getSupervisorConfig(t, tt.cfg, map[string]string{})
-			k := koanf.New("::")
-			err := k.Load(file.Provider(cfgFile.Name()), yaml.Parser())
+			resolvedCfg, err := config.ResolveURI(cfgFile.Name())
 			require.NoError(t, err)
-			err = k.UnmarshalWithConf("", &cfg, koanf.UnmarshalConf{
-				Tag: "mapstructure",
-			})
+
+			var cfg config.Supervisor
+			err = resolvedCfg.Unmarshal(&cfg)
 			require.NoError(t, err)
 
 			// Get the binary name and version from the Collector binary
@@ -1050,10 +1116,9 @@ func TestSupervisorBootstrapsCollector(t *testing.T) {
 			}
 			componentsInfo, err := cmd.Output()
 			require.NoError(t, err)
-			k = koanf.New("::")
-			err = k.Load(rawbytes.Provider(componentsInfo), yaml.Parser())
+			compConf, err := config.NewConfFromYAML(componentsInfo)
 			require.NoError(t, err)
-			buildinfo := k.StringMap("buildinfo")
+			buildinfo := confmapStringMap(compConf, "buildinfo")
 			command := buildinfo["command"]
 			version := buildinfo["version"]
 
@@ -1109,14 +1174,12 @@ func TestSupervisorBootstrapsCollectorAvailableComponents(t *testing.T) {
 
 	// Load the Supervisor config so we can get the location of
 	// the Collector that will be run.
-	var cfg config.Supervisor
 	cfgFile := getSupervisorConfig(t, "reports_available_components", map[string]string{})
-	k := koanf.New("::")
-	err := k.Load(file.Provider(cfgFile.Name()), yaml.Parser())
+	resolvedCfg, err := config.ResolveURI(cfgFile.Name())
 	require.NoError(t, err)
-	err = k.UnmarshalWithConf("", &cfg, koanf.UnmarshalConf{
-		Tag: "mapstructure",
-	})
+
+	var cfg config.Supervisor
+	err = resolvedCfg.Unmarshal(&cfg)
 	require.NoError(t, err)
 
 	// Get the binary name and version from the Collector binary
@@ -1127,10 +1190,9 @@ func TestSupervisorBootstrapsCollectorAvailableComponents(t *testing.T) {
 	agentPath := cfg.Agent.Executable
 	componentsInfo, err := exec.Command(agentPath, "components").Output()
 	require.NoError(t, err)
-	k = koanf.New("::")
-	err = k.Load(rawbytes.Provider(componentsInfo), yaml.Parser())
+	compConf, err := config.NewConfFromYAML(componentsInfo)
 	require.NoError(t, err)
-	buildinfo := k.StringMap("buildinfo")
+	buildinfo := confmapStringMap(compConf, "buildinfo")
 	command := buildinfo["command"]
 	version := buildinfo["version"]
 
@@ -1284,14 +1346,12 @@ func TestSupervisorReportsEffectiveConfig(t *testing.T) {
 func TestSupervisorAgentDescriptionConfigApplies(t *testing.T) {
 	// Load the Supervisor config so we can get the location of
 	// the Collector that will be run.
-	var cfg config.Supervisor
 	cfgFile := getSupervisorConfig(t, "agent_description", map[string]string{})
-	k := koanf.New("::")
-	err := k.Load(file.Provider(cfgFile.Name()), yaml.Parser())
+	resolvedCfg, err := config.ResolveURI(cfgFile.Name())
 	require.NoError(t, err)
-	err = k.UnmarshalWithConf("", &cfg, koanf.UnmarshalConf{
-		Tag: "mapstructure",
-	})
+
+	var cfg config.Supervisor
+	err = resolvedCfg.Unmarshal(&cfg)
 	require.NoError(t, err)
 
 	host, err := os.Hostname()
@@ -1305,10 +1365,9 @@ func TestSupervisorAgentDescriptionConfigApplies(t *testing.T) {
 	agentPath := cfg.Agent.Executable
 	componentsInfo, err := exec.Command(agentPath, "components").Output()
 	require.NoError(t, err)
-	k = koanf.New("::")
-	err = k.Load(rawbytes.Provider(componentsInfo), yaml.Parser())
+	compConf, err := config.NewConfFromYAML(componentsInfo)
 	require.NoError(t, err)
-	buildinfo := k.StringMap("buildinfo")
+	buildinfo := confmapStringMap(compConf, "buildinfo")
 	command := buildinfo["command"]
 	version := buildinfo["version"]
 
@@ -2542,14 +2601,12 @@ func TestSupervisorEmitBootstrapTelemetry(t *testing.T) {
 
 	// Load the Supervisor config so we can get the location of
 	// the Collector that will be run.
-	var cfg config.Supervisor
 	cfgFile := getSupervisorConfig(t, "nocap", map[string]string{})
-	k := koanf.New("::")
-	err := k.Load(file.Provider(cfgFile.Name()), yaml.Parser())
+	resolvedCfg, err := config.ResolveURI(cfgFile.Name())
 	require.NoError(t, err)
-	err = k.UnmarshalWithConf("", &cfg, koanf.UnmarshalConf{
-		Tag: "mapstructure",
-	})
+
+	var cfg config.Supervisor
+	err = resolvedCfg.Unmarshal(&cfg)
 	require.NoError(t, err)
 
 	// Get the binary name and version from the Collector binary
@@ -2560,10 +2617,9 @@ func TestSupervisorEmitBootstrapTelemetry(t *testing.T) {
 	agentPath := cfg.Agent.Executable
 	componentsInfo, err := exec.Command(agentPath, "components").Output()
 	require.NoError(t, err)
-	k = koanf.New("::")
-	err = k.Load(rawbytes.Provider(componentsInfo), yaml.Parser())
+	compConf, err := config.NewConfFromYAML(componentsInfo)
 	require.NoError(t, err)
-	buildinfo := k.StringMap("buildinfo")
+	buildinfo := confmapStringMap(compConf, "buildinfo")
 	command := buildinfo["command"]
 	version := buildinfo["version"]
 
@@ -2885,4 +2941,23 @@ func TestSupervisorFallbackDisablesAfterFirstConnect(t *testing.T) {
 	require.Never(t, func() bool {
 		return healthCheckOK(fallbackPort)
 	}, 3*time.Second, 200*time.Millisecond, "Fallback config should not be re-applied after initial connection")
+}
+
+// confmapStringMap extracts a sub-key from a confmap.Conf as a map[string]string.
+func confmapStringMap(conf *confmap.Conf, key string) map[string]string {
+	val := conf.Get(key)
+	if val == nil {
+		return nil
+	}
+	m, ok := val.(map[string]any)
+	if !ok {
+		return nil
+	}
+	result := make(map[string]string, len(m))
+	for k, v := range m {
+		if s, ok := v.(string); ok {
+			result[k] = s
+		}
+	}
+	return result
 }
