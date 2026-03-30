@@ -91,19 +91,12 @@ jobs:
           GOOS=linux GOARCH=arm64 make opampsupervisor
           cp bin/opampsupervisor_linux_amd64 cmd/opampsupervisor/opampsupervisor-linux-amd64
           cp bin/opampsupervisor_linux_arm64 cmd/opampsupervisor/opampsupervisor-linux-arm64
-      - name: Login to JFrog
-        if: env.SHOULD_PUSH == 'true'
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
-        with:
-          registry: cgx.jfrog.io
-          username: ${{ secrets.JFROG_USER }}
-          password: ${{ secrets.JFROG_PASSWORD }}
-      - name: Build and optionally publish image
+      - name: Build image smoke test
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6
         with:
           context: cmd/opampsupervisor
           file: cmd/opampsupervisor/Dockerfile.release
-          push: ${{ env.SHOULD_PUSH == 'true' }}
+          push: false
           tags: ${{ env.IMAGE_NAME }}:${{ steps.metadata.outputs.image_tag }}
           platforms: linux/amd64,linux/arm64
       - run: ./.github/workflows/scripts/check-disk-space.sh
