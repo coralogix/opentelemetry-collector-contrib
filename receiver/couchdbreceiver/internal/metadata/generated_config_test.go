@@ -20,20 +20,36 @@ func TestMetricsBuilderConfig(t *testing.T) {
 	}{
 		{
 			name: "default",
-			want: DefaultMetricsBuilderConfig(),
+			want: NewDefaultMetricsBuilderConfig(),
 		},
 		{
 			name: "all_set",
 			want: MetricsBuilderConfig{
 				Metrics: MetricsConfig{
-					CouchdbAverageRequestTime: MetricConfig{Enabled: true},
-					CouchdbDatabaseOpen:       MetricConfig{Enabled: true},
-					CouchdbDatabaseOperations: MetricConfig{Enabled: true},
-					CouchdbFileDescriptorOpen: MetricConfig{Enabled: true},
-					CouchdbHttpdBulkRequests:  MetricConfig{Enabled: true},
-					CouchdbHttpdRequests:      MetricConfig{Enabled: true},
-					CouchdbHttpdResponses:     MetricConfig{Enabled: true},
-					CouchdbHttpdViews:         MetricConfig{Enabled: true},
+					CouchdbAverageRequestTime: MetricConfig{
+						Enabled: true,
+					},
+					CouchdbDatabaseOpen: MetricConfig{
+						Enabled: true,
+					},
+					CouchdbDatabaseOperations: MetricConfig{
+						Enabled: true,
+					},
+					CouchdbFileDescriptorOpen: MetricConfig{
+						Enabled: true,
+					},
+					CouchdbHttpdBulkRequests: MetricConfig{
+						Enabled: true,
+					},
+					CouchdbHttpdRequests: MetricConfig{
+						Enabled: true,
+					},
+					CouchdbHttpdResponses: MetricConfig{
+						Enabled: true,
+					},
+					CouchdbHttpdViews: MetricConfig{
+						Enabled: true,
+					},
 				},
 				ResourceAttributes: ResourceAttributesConfig{
 					CouchdbNodeName: ResourceAttributeConfig{Enabled: true},
@@ -44,14 +60,30 @@ func TestMetricsBuilderConfig(t *testing.T) {
 			name: "none_set",
 			want: MetricsBuilderConfig{
 				Metrics: MetricsConfig{
-					CouchdbAverageRequestTime: MetricConfig{Enabled: false},
-					CouchdbDatabaseOpen:       MetricConfig{Enabled: false},
-					CouchdbDatabaseOperations: MetricConfig{Enabled: false},
-					CouchdbFileDescriptorOpen: MetricConfig{Enabled: false},
-					CouchdbHttpdBulkRequests:  MetricConfig{Enabled: false},
-					CouchdbHttpdRequests:      MetricConfig{Enabled: false},
-					CouchdbHttpdResponses:     MetricConfig{Enabled: false},
-					CouchdbHttpdViews:         MetricConfig{Enabled: false},
+					CouchdbAverageRequestTime: MetricConfig{
+						Enabled: false,
+					},
+					CouchdbDatabaseOpen: MetricConfig{
+						Enabled: false,
+					},
+					CouchdbDatabaseOperations: MetricConfig{
+						Enabled: false,
+					},
+					CouchdbFileDescriptorOpen: MetricConfig{
+						Enabled: false,
+					},
+					CouchdbHttpdBulkRequests: MetricConfig{
+						Enabled: false,
+					},
+					CouchdbHttpdRequests: MetricConfig{
+						Enabled: false,
+					},
+					CouchdbHttpdResponses: MetricConfig{
+						Enabled: false,
+					},
+					CouchdbHttpdViews: MetricConfig{
+						Enabled: false,
+					},
 				},
 				ResourceAttributes: ResourceAttributesConfig{
 					CouchdbNodeName: ResourceAttributeConfig{Enabled: false},
@@ -73,7 +105,7 @@ func loadMetricsBuilderConfig(t *testing.T, name string) MetricsBuilderConfig {
 	require.NoError(t, err)
 	sub, err := cm.Sub(name)
 	require.NoError(t, err)
-	cfg := DefaultMetricsBuilderConfig()
+	cfg := NewDefaultMetricsBuilderConfig()
 	require.NoError(t, sub.Unmarshal(&cfg, confmap.WithIgnoreUnused()))
 	return cfg
 }

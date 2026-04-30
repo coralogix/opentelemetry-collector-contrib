@@ -20,60 +20,171 @@ func TestMetricsBuilderConfig(t *testing.T) {
 	}{
 		{
 			name: "default",
-			want: DefaultMetricsBuilderConfig(),
+			want: NewDefaultMetricsBuilderConfig(),
 		},
 		{
 			name: "all_set",
 			want: MetricsBuilderConfig{
 				Metrics: MetricsConfig{
-					K8sContainerCPULimit:                MetricConfig{Enabled: true},
-					K8sContainerCPURequest:              MetricConfig{Enabled: true},
-					K8sContainerEphemeralstorageLimit:   MetricConfig{Enabled: true},
-					K8sContainerEphemeralstorageRequest: MetricConfig{Enabled: true},
-					K8sContainerMemoryLimit:             MetricConfig{Enabled: true},
-					K8sContainerMemoryRequest:           MetricConfig{Enabled: true},
-					K8sContainerReady:                   MetricConfig{Enabled: true},
-					K8sContainerRestarts:                MetricConfig{Enabled: true},
-					K8sContainerStatusReason:            MetricConfig{Enabled: true},
-					K8sContainerStatusState:             MetricConfig{Enabled: true},
-					K8sContainerStorageLimit:            MetricConfig{Enabled: true},
-					K8sContainerStorageRequest:          MetricConfig{Enabled: true},
-					K8sCronjobActiveJobs:                MetricConfig{Enabled: true},
-					K8sDaemonsetCurrentScheduledNodes:   MetricConfig{Enabled: true},
-					K8sDaemonsetDesiredScheduledNodes:   MetricConfig{Enabled: true},
-					K8sDaemonsetMisscheduledNodes:       MetricConfig{Enabled: true},
-					K8sDaemonsetReadyNodes:              MetricConfig{Enabled: true},
-					K8sDeploymentAvailable:              MetricConfig{Enabled: true},
-					K8sDeploymentDesired:                MetricConfig{Enabled: true},
-					K8sHpaCurrentReplicas:               MetricConfig{Enabled: true},
-					K8sHpaDesiredReplicas:               MetricConfig{Enabled: true},
-					K8sHpaMaxReplicas:                   MetricConfig{Enabled: true},
-					K8sHpaMinReplicas:                   MetricConfig{Enabled: true},
-					K8sJobActivePods:                    MetricConfig{Enabled: true},
-					K8sJobDesiredSuccessfulPods:         MetricConfig{Enabled: true},
-					K8sJobFailedPods:                    MetricConfig{Enabled: true},
-					K8sJobMaxParallelPods:               MetricConfig{Enabled: true},
-					K8sJobSuccessfulPods:                MetricConfig{Enabled: true},
-					K8sNamespacePhase:                   MetricConfig{Enabled: true},
-					K8sNodeCondition:                    MetricConfig{Enabled: true},
-					K8sPodPhase:                         MetricConfig{Enabled: true},
-					K8sPodStatusReason:                  MetricConfig{Enabled: true},
-					K8sReplicasetAvailable:              MetricConfig{Enabled: true},
-					K8sReplicasetDesired:                MetricConfig{Enabled: true},
-					K8sReplicationControllerAvailable:   MetricConfig{Enabled: true},
-					K8sReplicationControllerDesired:     MetricConfig{Enabled: true},
-					K8sResourceQuotaHardLimit:           MetricConfig{Enabled: true},
-					K8sResourceQuotaUsed:                MetricConfig{Enabled: true},
-					K8sServiceEndpointCount:             MetricConfig{Enabled: true},
-					K8sServiceLoadBalancerIngressCount:  MetricConfig{Enabled: true},
-					K8sStatefulsetCurrentPods:           MetricConfig{Enabled: true},
-					K8sStatefulsetDesiredPods:           MetricConfig{Enabled: true},
-					K8sStatefulsetReadyPods:             MetricConfig{Enabled: true},
-					K8sStatefulsetUpdatedPods:           MetricConfig{Enabled: true},
-					OpenshiftAppliedclusterquotaLimit:   MetricConfig{Enabled: true},
-					OpenshiftAppliedclusterquotaUsed:    MetricConfig{Enabled: true},
-					OpenshiftClusterquotaLimit:          MetricConfig{Enabled: true},
-					OpenshiftClusterquotaUsed:           MetricConfig{Enabled: true},
+					K8sContainerCPULimit: MetricConfig{
+						Enabled: true,
+					},
+					K8sContainerCPURequest: MetricConfig{
+						Enabled: true,
+					},
+					K8sContainerEphemeralstorageLimit: MetricConfig{
+						Enabled: true,
+					},
+					K8sContainerEphemeralstorageRequest: MetricConfig{
+						Enabled: true,
+					},
+					K8sContainerMemoryLimit: MetricConfig{
+						Enabled: true,
+					},
+					K8sContainerMemoryRequest: MetricConfig{
+						Enabled: true,
+					},
+					K8sContainerReady: MetricConfig{
+						Enabled: true,
+					},
+					K8sContainerRestarts: MetricConfig{
+						Enabled: true,
+					},
+					K8sContainerStatusReason: MetricConfig{
+						Enabled: true,
+					},
+					K8sContainerStatusState: MetricConfig{
+						Enabled: true,
+					},
+					K8sContainerStorageLimit: MetricConfig{
+						Enabled: true,
+					},
+					K8sContainerStorageRequest: MetricConfig{
+						Enabled: true,
+					},
+					K8sCronjobActiveJobs: MetricConfig{
+						Enabled: true,
+					},
+					K8sDaemonsetCurrentScheduledNodes: MetricConfig{
+						Enabled: true,
+					},
+					K8sDaemonsetDesiredScheduledNodes: MetricConfig{
+						Enabled: true,
+					},
+					K8sDaemonsetMisscheduledNodes: MetricConfig{
+						Enabled: true,
+					},
+					K8sDaemonsetReadyNodes: MetricConfig{
+						Enabled: true,
+					},
+					K8sDeploymentAvailable: MetricConfig{
+						Enabled: true,
+					},
+					K8sDeploymentDesired: MetricConfig{
+						Enabled: true,
+					},
+					K8sHpaCurrentReplicas: MetricConfig{
+						Enabled: true,
+					},
+					K8sHpaDesiredReplicas: MetricConfig{
+						Enabled: true,
+					},
+					K8sHpaMaxReplicas: MetricConfig{
+						Enabled: true,
+					},
+					K8sHpaMinReplicas: MetricConfig{
+						Enabled: true,
+					},
+					K8sJobActivePods: MetricConfig{
+						Enabled: true,
+					},
+					K8sJobDesiredSuccessfulPods: MetricConfig{
+						Enabled: true,
+					},
+					K8sJobFailedPods: MetricConfig{
+						Enabled: true,
+					},
+					K8sJobMaxParallelPods: MetricConfig{
+						Enabled: true,
+					},
+					K8sJobSuccessfulPods: MetricConfig{
+						Enabled: true,
+					},
+					K8sNamespacePhase: MetricConfig{
+						Enabled: true,
+					},
+					K8sNodeCondition: MetricConfig{
+						Enabled: true,
+					},
+					K8sPersistentvolumeStatusPhase: MetricConfig{
+						Enabled: true,
+					},
+					K8sPersistentvolumeStorageCapacity: MetricConfig{
+						Enabled: true,
+					},
+					K8sPersistentvolumeclaimStatusPhase: MetricConfig{
+						Enabled: true,
+					},
+					K8sPersistentvolumeclaimStorageCapacity: MetricConfig{
+						Enabled: true,
+					},
+					K8sPersistentvolumeclaimStorageRequest: MetricConfig{
+						Enabled: true,
+					},
+					K8sPodPhase: MetricConfig{
+						Enabled: true,
+					},
+					K8sPodStatusReason: MetricConfig{
+						Enabled: true,
+					},
+					K8sReplicasetAvailable: MetricConfig{
+						Enabled: true,
+					},
+					K8sReplicasetDesired: MetricConfig{
+						Enabled: true,
+					},
+					K8sReplicationControllerAvailable: MetricConfig{
+						Enabled: true,
+					},
+					K8sReplicationControllerDesired: MetricConfig{
+						Enabled: true,
+					},
+					K8sResourceQuotaHardLimit: MetricConfig{
+						Enabled: true,
+					},
+					K8sResourceQuotaUsed: MetricConfig{
+						Enabled: true,
+					},
+					K8sServiceEndpointCount: MetricConfig{
+						Enabled: true,
+					},
+					K8sServiceLoadBalancerIngressCount: MetricConfig{
+						Enabled: true,
+					},
+					K8sStatefulsetCurrentPods: MetricConfig{
+						Enabled: true,
+					},
+					K8sStatefulsetDesiredPods: MetricConfig{
+						Enabled: true,
+					},
+					K8sStatefulsetReadyPods: MetricConfig{
+						Enabled: true,
+					},
+					K8sStatefulsetUpdatedPods: MetricConfig{
+						Enabled: true,
+					},
+					OpenshiftAppliedclusterquotaLimit: MetricConfig{
+						Enabled: true,
+					},
+					OpenshiftAppliedclusterquotaUsed: MetricConfig{
+						Enabled: true,
+					},
+					OpenshiftClusterquotaLimit: MetricConfig{
+						Enabled: true,
+					},
+					OpenshiftClusterquotaUsed: MetricConfig{
+						Enabled: true,
+					},
 				},
 				ResourceAttributes: ResourceAttributesConfig{
 					ContainerID:                            ResourceAttributeConfig{Enabled: true},
@@ -101,6 +212,11 @@ func TestMetricsBuilderConfig(t *testing.T) {
 					K8sNamespaceUID:                        ResourceAttributeConfig{Enabled: true},
 					K8sNodeName:                            ResourceAttributeConfig{Enabled: true},
 					K8sNodeUID:                             ResourceAttributeConfig{Enabled: true},
+					K8sPersistentvolumeName:                ResourceAttributeConfig{Enabled: true},
+					K8sPersistentvolumeReclaimPolicy:       ResourceAttributeConfig{Enabled: true},
+					K8sPersistentvolumeUID:                 ResourceAttributeConfig{Enabled: true},
+					K8sPersistentvolumeclaimName:           ResourceAttributeConfig{Enabled: true},
+					K8sPersistentvolumeclaimUID:            ResourceAttributeConfig{Enabled: true},
 					K8sPodName:                             ResourceAttributeConfig{Enabled: true},
 					K8sPodQosClass:                         ResourceAttributeConfig{Enabled: true},
 					K8sPodUID:                              ResourceAttributeConfig{Enabled: true},
@@ -117,6 +233,7 @@ func TestMetricsBuilderConfig(t *testing.T) {
 					K8sServiceUID:                          ResourceAttributeConfig{Enabled: true},
 					K8sStatefulsetName:                     ResourceAttributeConfig{Enabled: true},
 					K8sStatefulsetUID:                      ResourceAttributeConfig{Enabled: true},
+					K8sStorageclassName:                    ResourceAttributeConfig{Enabled: true},
 					OpenshiftClusterquotaName:              ResourceAttributeConfig{Enabled: true},
 					OpenshiftClusterquotaUID:               ResourceAttributeConfig{Enabled: true},
 					OsDescription:                          ResourceAttributeConfig{Enabled: true},
@@ -128,54 +245,165 @@ func TestMetricsBuilderConfig(t *testing.T) {
 			name: "none_set",
 			want: MetricsBuilderConfig{
 				Metrics: MetricsConfig{
-					K8sContainerCPULimit:                MetricConfig{Enabled: false},
-					K8sContainerCPURequest:              MetricConfig{Enabled: false},
-					K8sContainerEphemeralstorageLimit:   MetricConfig{Enabled: false},
-					K8sContainerEphemeralstorageRequest: MetricConfig{Enabled: false},
-					K8sContainerMemoryLimit:             MetricConfig{Enabled: false},
-					K8sContainerMemoryRequest:           MetricConfig{Enabled: false},
-					K8sContainerReady:                   MetricConfig{Enabled: false},
-					K8sContainerRestarts:                MetricConfig{Enabled: false},
-					K8sContainerStatusReason:            MetricConfig{Enabled: false},
-					K8sContainerStatusState:             MetricConfig{Enabled: false},
-					K8sContainerStorageLimit:            MetricConfig{Enabled: false},
-					K8sContainerStorageRequest:          MetricConfig{Enabled: false},
-					K8sCronjobActiveJobs:                MetricConfig{Enabled: false},
-					K8sDaemonsetCurrentScheduledNodes:   MetricConfig{Enabled: false},
-					K8sDaemonsetDesiredScheduledNodes:   MetricConfig{Enabled: false},
-					K8sDaemonsetMisscheduledNodes:       MetricConfig{Enabled: false},
-					K8sDaemonsetReadyNodes:              MetricConfig{Enabled: false},
-					K8sDeploymentAvailable:              MetricConfig{Enabled: false},
-					K8sDeploymentDesired:                MetricConfig{Enabled: false},
-					K8sHpaCurrentReplicas:               MetricConfig{Enabled: false},
-					K8sHpaDesiredReplicas:               MetricConfig{Enabled: false},
-					K8sHpaMaxReplicas:                   MetricConfig{Enabled: false},
-					K8sHpaMinReplicas:                   MetricConfig{Enabled: false},
-					K8sJobActivePods:                    MetricConfig{Enabled: false},
-					K8sJobDesiredSuccessfulPods:         MetricConfig{Enabled: false},
-					K8sJobFailedPods:                    MetricConfig{Enabled: false},
-					K8sJobMaxParallelPods:               MetricConfig{Enabled: false},
-					K8sJobSuccessfulPods:                MetricConfig{Enabled: false},
-					K8sNamespacePhase:                   MetricConfig{Enabled: false},
-					K8sNodeCondition:                    MetricConfig{Enabled: false},
-					K8sPodPhase:                         MetricConfig{Enabled: false},
-					K8sPodStatusReason:                  MetricConfig{Enabled: false},
-					K8sReplicasetAvailable:              MetricConfig{Enabled: false},
-					K8sReplicasetDesired:                MetricConfig{Enabled: false},
-					K8sReplicationControllerAvailable:   MetricConfig{Enabled: false},
-					K8sReplicationControllerDesired:     MetricConfig{Enabled: false},
-					K8sResourceQuotaHardLimit:           MetricConfig{Enabled: false},
-					K8sResourceQuotaUsed:                MetricConfig{Enabled: false},
-					K8sServiceEndpointCount:             MetricConfig{Enabled: false},
-					K8sServiceLoadBalancerIngressCount:  MetricConfig{Enabled: false},
-					K8sStatefulsetCurrentPods:           MetricConfig{Enabled: false},
-					K8sStatefulsetDesiredPods:           MetricConfig{Enabled: false},
-					K8sStatefulsetReadyPods:             MetricConfig{Enabled: false},
-					K8sStatefulsetUpdatedPods:           MetricConfig{Enabled: false},
-					OpenshiftAppliedclusterquotaLimit:   MetricConfig{Enabled: false},
-					OpenshiftAppliedclusterquotaUsed:    MetricConfig{Enabled: false},
-					OpenshiftClusterquotaLimit:          MetricConfig{Enabled: false},
-					OpenshiftClusterquotaUsed:           MetricConfig{Enabled: false},
+					K8sContainerCPULimit: MetricConfig{
+						Enabled: false,
+					},
+					K8sContainerCPURequest: MetricConfig{
+						Enabled: false,
+					},
+					K8sContainerEphemeralstorageLimit: MetricConfig{
+						Enabled: false,
+					},
+					K8sContainerEphemeralstorageRequest: MetricConfig{
+						Enabled: false,
+					},
+					K8sContainerMemoryLimit: MetricConfig{
+						Enabled: false,
+					},
+					K8sContainerMemoryRequest: MetricConfig{
+						Enabled: false,
+					},
+					K8sContainerReady: MetricConfig{
+						Enabled: false,
+					},
+					K8sContainerRestarts: MetricConfig{
+						Enabled: false,
+					},
+					K8sContainerStatusReason: MetricConfig{
+						Enabled: false,
+					},
+					K8sContainerStatusState: MetricConfig{
+						Enabled: false,
+					},
+					K8sContainerStorageLimit: MetricConfig{
+						Enabled: false,
+					},
+					K8sContainerStorageRequest: MetricConfig{
+						Enabled: false,
+					},
+					K8sCronjobActiveJobs: MetricConfig{
+						Enabled: false,
+					},
+					K8sDaemonsetCurrentScheduledNodes: MetricConfig{
+						Enabled: false,
+					},
+					K8sDaemonsetDesiredScheduledNodes: MetricConfig{
+						Enabled: false,
+					},
+					K8sDaemonsetMisscheduledNodes: MetricConfig{
+						Enabled: false,
+					},
+					K8sDaemonsetReadyNodes: MetricConfig{
+						Enabled: false,
+					},
+					K8sDeploymentAvailable: MetricConfig{
+						Enabled: false,
+					},
+					K8sDeploymentDesired: MetricConfig{
+						Enabled: false,
+					},
+					K8sHpaCurrentReplicas: MetricConfig{
+						Enabled: false,
+					},
+					K8sHpaDesiredReplicas: MetricConfig{
+						Enabled: false,
+					},
+					K8sHpaMaxReplicas: MetricConfig{
+						Enabled: false,
+					},
+					K8sHpaMinReplicas: MetricConfig{
+						Enabled: false,
+					},
+					K8sJobActivePods: MetricConfig{
+						Enabled: false,
+					},
+					K8sJobDesiredSuccessfulPods: MetricConfig{
+						Enabled: false,
+					},
+					K8sJobFailedPods: MetricConfig{
+						Enabled: false,
+					},
+					K8sJobMaxParallelPods: MetricConfig{
+						Enabled: false,
+					},
+					K8sJobSuccessfulPods: MetricConfig{
+						Enabled: false,
+					},
+					K8sNamespacePhase: MetricConfig{
+						Enabled: false,
+					},
+					K8sNodeCondition: MetricConfig{
+						Enabled: false,
+					},
+					K8sPersistentvolumeStatusPhase: MetricConfig{
+						Enabled: false,
+					},
+					K8sPersistentvolumeStorageCapacity: MetricConfig{
+						Enabled: false,
+					},
+					K8sPersistentvolumeclaimStatusPhase: MetricConfig{
+						Enabled: false,
+					},
+					K8sPersistentvolumeclaimStorageCapacity: MetricConfig{
+						Enabled: false,
+					},
+					K8sPersistentvolumeclaimStorageRequest: MetricConfig{
+						Enabled: false,
+					},
+					K8sPodPhase: MetricConfig{
+						Enabled: false,
+					},
+					K8sPodStatusReason: MetricConfig{
+						Enabled: false,
+					},
+					K8sReplicasetAvailable: MetricConfig{
+						Enabled: false,
+					},
+					K8sReplicasetDesired: MetricConfig{
+						Enabled: false,
+					},
+					K8sReplicationControllerAvailable: MetricConfig{
+						Enabled: false,
+					},
+					K8sReplicationControllerDesired: MetricConfig{
+						Enabled: false,
+					},
+					K8sResourceQuotaHardLimit: MetricConfig{
+						Enabled: false,
+					},
+					K8sResourceQuotaUsed: MetricConfig{
+						Enabled: false,
+					},
+					K8sServiceEndpointCount: MetricConfig{
+						Enabled: false,
+					},
+					K8sServiceLoadBalancerIngressCount: MetricConfig{
+						Enabled: false,
+					},
+					K8sStatefulsetCurrentPods: MetricConfig{
+						Enabled: false,
+					},
+					K8sStatefulsetDesiredPods: MetricConfig{
+						Enabled: false,
+					},
+					K8sStatefulsetReadyPods: MetricConfig{
+						Enabled: false,
+					},
+					K8sStatefulsetUpdatedPods: MetricConfig{
+						Enabled: false,
+					},
+					OpenshiftAppliedclusterquotaLimit: MetricConfig{
+						Enabled: false,
+					},
+					OpenshiftAppliedclusterquotaUsed: MetricConfig{
+						Enabled: false,
+					},
+					OpenshiftClusterquotaLimit: MetricConfig{
+						Enabled: false,
+					},
+					OpenshiftClusterquotaUsed: MetricConfig{
+						Enabled: false,
+					},
 				},
 				ResourceAttributes: ResourceAttributesConfig{
 					ContainerID:                            ResourceAttributeConfig{Enabled: false},
@@ -203,6 +431,11 @@ func TestMetricsBuilderConfig(t *testing.T) {
 					K8sNamespaceUID:                        ResourceAttributeConfig{Enabled: false},
 					K8sNodeName:                            ResourceAttributeConfig{Enabled: false},
 					K8sNodeUID:                             ResourceAttributeConfig{Enabled: false},
+					K8sPersistentvolumeName:                ResourceAttributeConfig{Enabled: false},
+					K8sPersistentvolumeReclaimPolicy:       ResourceAttributeConfig{Enabled: false},
+					K8sPersistentvolumeUID:                 ResourceAttributeConfig{Enabled: false},
+					K8sPersistentvolumeclaimName:           ResourceAttributeConfig{Enabled: false},
+					K8sPersistentvolumeclaimUID:            ResourceAttributeConfig{Enabled: false},
 					K8sPodName:                             ResourceAttributeConfig{Enabled: false},
 					K8sPodQosClass:                         ResourceAttributeConfig{Enabled: false},
 					K8sPodUID:                              ResourceAttributeConfig{Enabled: false},
@@ -219,6 +452,7 @@ func TestMetricsBuilderConfig(t *testing.T) {
 					K8sServiceUID:                          ResourceAttributeConfig{Enabled: false},
 					K8sStatefulsetName:                     ResourceAttributeConfig{Enabled: false},
 					K8sStatefulsetUID:                      ResourceAttributeConfig{Enabled: false},
+					K8sStorageclassName:                    ResourceAttributeConfig{Enabled: false},
 					OpenshiftClusterquotaName:              ResourceAttributeConfig{Enabled: false},
 					OpenshiftClusterquotaUID:               ResourceAttributeConfig{Enabled: false},
 					OsDescription:                          ResourceAttributeConfig{Enabled: false},
@@ -241,7 +475,7 @@ func loadMetricsBuilderConfig(t *testing.T, name string) MetricsBuilderConfig {
 	require.NoError(t, err)
 	sub, err := cm.Sub(name)
 	require.NoError(t, err)
-	cfg := DefaultMetricsBuilderConfig()
+	cfg := NewDefaultMetricsBuilderConfig()
 	require.NoError(t, sub.Unmarshal(&cfg, confmap.WithIgnoreUnused()))
 	return cfg
 }
@@ -283,6 +517,11 @@ func TestResourceAttributesConfig(t *testing.T) {
 				K8sNamespaceUID:                        ResourceAttributeConfig{Enabled: true},
 				K8sNodeName:                            ResourceAttributeConfig{Enabled: true},
 				K8sNodeUID:                             ResourceAttributeConfig{Enabled: true},
+				K8sPersistentvolumeName:                ResourceAttributeConfig{Enabled: true},
+				K8sPersistentvolumeReclaimPolicy:       ResourceAttributeConfig{Enabled: true},
+				K8sPersistentvolumeUID:                 ResourceAttributeConfig{Enabled: true},
+				K8sPersistentvolumeclaimName:           ResourceAttributeConfig{Enabled: true},
+				K8sPersistentvolumeclaimUID:            ResourceAttributeConfig{Enabled: true},
 				K8sPodName:                             ResourceAttributeConfig{Enabled: true},
 				K8sPodQosClass:                         ResourceAttributeConfig{Enabled: true},
 				K8sPodUID:                              ResourceAttributeConfig{Enabled: true},
@@ -299,6 +538,7 @@ func TestResourceAttributesConfig(t *testing.T) {
 				K8sServiceUID:                          ResourceAttributeConfig{Enabled: true},
 				K8sStatefulsetName:                     ResourceAttributeConfig{Enabled: true},
 				K8sStatefulsetUID:                      ResourceAttributeConfig{Enabled: true},
+				K8sStorageclassName:                    ResourceAttributeConfig{Enabled: true},
 				OpenshiftClusterquotaName:              ResourceAttributeConfig{Enabled: true},
 				OpenshiftClusterquotaUID:               ResourceAttributeConfig{Enabled: true},
 				OsDescription:                          ResourceAttributeConfig{Enabled: true},
@@ -333,6 +573,11 @@ func TestResourceAttributesConfig(t *testing.T) {
 				K8sNamespaceUID:                        ResourceAttributeConfig{Enabled: false},
 				K8sNodeName:                            ResourceAttributeConfig{Enabled: false},
 				K8sNodeUID:                             ResourceAttributeConfig{Enabled: false},
+				K8sPersistentvolumeName:                ResourceAttributeConfig{Enabled: false},
+				K8sPersistentvolumeReclaimPolicy:       ResourceAttributeConfig{Enabled: false},
+				K8sPersistentvolumeUID:                 ResourceAttributeConfig{Enabled: false},
+				K8sPersistentvolumeclaimName:           ResourceAttributeConfig{Enabled: false},
+				K8sPersistentvolumeclaimUID:            ResourceAttributeConfig{Enabled: false},
 				K8sPodName:                             ResourceAttributeConfig{Enabled: false},
 				K8sPodQosClass:                         ResourceAttributeConfig{Enabled: false},
 				K8sPodUID:                              ResourceAttributeConfig{Enabled: false},
@@ -349,6 +594,7 @@ func TestResourceAttributesConfig(t *testing.T) {
 				K8sServiceUID:                          ResourceAttributeConfig{Enabled: false},
 				K8sStatefulsetName:                     ResourceAttributeConfig{Enabled: false},
 				K8sStatefulsetUID:                      ResourceAttributeConfig{Enabled: false},
+				K8sStorageclassName:                    ResourceAttributeConfig{Enabled: false},
 				OpenshiftClusterquotaName:              ResourceAttributeConfig{Enabled: false},
 				OpenshiftClusterquotaUID:               ResourceAttributeConfig{Enabled: false},
 				OsDescription:                          ResourceAttributeConfig{Enabled: false},
