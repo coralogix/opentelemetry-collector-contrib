@@ -7,3 +7,9 @@ status:
     alpha: [metrics]
   codeowners:
     active: [evan-bradley, atoulme, tigrannajaryan]
+
+tests:
+  goleak:
+    ignore:
+      top:
+        - "github.com/baidubce/bce-sdk-go/util/log.NewLogger.func1"

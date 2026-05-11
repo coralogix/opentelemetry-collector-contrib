@@ -4,6 +4,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -36,6 +37,12 @@ func TestRetrieveURIForProvider(t *testing.T) {
 			uri:          "s3://bucket.s3.us-east-1.amazonaws.com/config.yaml",
 			wantURI:      "s3://bucket.s3.us-east-1.amazonaws.com/config.yaml",
 			wantProvider: "s3",
+		},
+		{
+			name:         "objstore URI keeps objstore scheme",
+			uri:          "objstore:test-config-provider/config.yaml?type=gcs",
+			wantURI:      "objstore:test-config-provider/config.yaml?type=gcs",
+			wantProvider: "objstore",
 		},
 		{
 			name:         "env URI keeps env scheme",
@@ -99,6 +106,25 @@ func TestRetrieveURIAsConf_FilePathWithColon(t *testing.T) {
 	conf, err := RetrieveURIAsConf(configPath, nil)
 	require.NoError(t, err)
 	require.Equal(t, "localhost:13133", conf.Get("extensions::health_check::endpoint"))
+}
+
+func TestRetrieveURIAsConf_ObjstoreURI(t *testing.T) {
+	bucketDir := t.TempDir()
+	configDir := filepath.Join(bucketDir, "configs")
+	require.NoError(t, os.MkdirAll(configDir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "otel.yaml"), []byte(`
+extensions:
+  health_check/objstore:
+    endpoint: localhost:13134
+`), 0o600))
+
+	objstoreConfigPath := filepath.Join(t.TempDir(), "objstore.yaml")
+	require.NoError(t, os.WriteFile(objstoreConfigPath, fmt.Appendf(nil, "directory: %q\n", bucketDir), 0o600))
+	t.Setenv("OBJSTORE_CONFIG_PATH", objstoreConfigPath)
+
+	conf, err := RetrieveURIAsConf("objstore:configs/otel.yaml?type=filesystem", nil)
+	require.NoError(t, err)
+	require.Equal(t, "localhost:13134", conf.Get("extensions::health_check/objstore::endpoint"))
 }
 
 func TestResolveURIs_ExpandsEnvByDefaultScheme(t *testing.T) {
