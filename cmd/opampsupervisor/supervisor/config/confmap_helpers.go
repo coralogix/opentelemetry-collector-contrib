@@ -12,7 +12,9 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/open-telemetry/opentelemetry-collector-contrib/confmap/provider/objstoreprovider"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/confmap/provider/s3provider"
+
 	"go.opentelemetry.io/collector/confmap"
 	"go.opentelemetry.io/collector/confmap/provider/envprovider"
 	"go.opentelemetry.io/collector/confmap/provider/fileprovider"
@@ -22,9 +24,10 @@ import (
 
 var configURISchemeRegexp = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]+:`)
 var providerSchemes = map[string]struct{}{
-	"file": {},
-	"env":  {},
-	"s3":   {},
+	"file":     {},
+	"env":      {},
+	"s3":       {},
+	"objstore": {},
 }
 
 func normalizeConfigURI(uri string) string {
@@ -42,12 +45,8 @@ func normalizeConfigURI(uri string) string {
 
 func resolverSettings(uris []string) confmap.ResolverSettings {
 	return confmap.ResolverSettings{
-		URIs: uris,
-		ProviderFactories: []confmap.ProviderFactory{
-			fileprovider.NewFactory(),
-			envprovider.NewFactory(),
-			s3provider.NewFactory(),
-		},
+		URIs:               uris,
+		ProviderFactories:  providerFactories(),
 		ConverterFactories: []confmap.ConverterFactory{},
 		DefaultScheme:      "env",
 	}
@@ -58,6 +57,7 @@ func providerFactories() []confmap.ProviderFactory {
 		fileprovider.NewFactory(),
 		envprovider.NewFactory(),
 		s3provider.NewFactory(),
+		objstoreprovider.NewFactory(),
 	}
 }
 
