@@ -1,4 +1,4 @@
-module github.com/open-telemetry/opentelemetry-collector-contrib/confmap/provider/objstoreprovider
+module github.com/coralogix/opentelemetry-collector-contrib/confmap/provider/objstoreprovider
 
 go 1.25.0
 
