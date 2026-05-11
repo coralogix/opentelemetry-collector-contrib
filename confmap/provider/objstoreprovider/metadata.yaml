@@ -1,0 +1,15 @@
+type: objstore
+
+status:
+  class: provider
+  stability:
+    alpha: [provider]
+  distributions: [contrib]
+  codeowners:
+    active: []
+
+tests:
+  goleak:
+    ignore:
+      top:
+        - "github.com/baidubce/bce-sdk-go/util/log.NewLogger.func1"
