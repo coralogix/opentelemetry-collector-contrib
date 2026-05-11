@@ -12,7 +12,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/open-telemetry/opentelemetry-collector-contrib/confmap/provider/objstoreprovider"
+	"github.com/coralogix/opentelemetry-collector-contrib/confmap/provider/objstoreprovider"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/confmap/provider/s3provider"
 
 	"go.opentelemetry.io/collector/confmap"

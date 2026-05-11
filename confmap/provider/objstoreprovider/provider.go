@@ -1,6 +1,6 @@
 //go:generate make mdatagen
 
-package objstoreprovider // import "github.com/open-telemetry/opentelemetry-collector-contrib/confmap/provider/objstoreprovider"
+package objstoreprovider // import "github.com/coralogix/opentelemetry-collector-contrib/confmap/provider/objstoreprovider"
 
 import (
 	"context"
