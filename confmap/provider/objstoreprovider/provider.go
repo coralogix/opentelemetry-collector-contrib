@@ -137,11 +137,6 @@ func parseURI(uri string) (string, string, error) {
 		return "", "", fmt.Errorf("%q uri is not supported by %q provider", uri, schemeName)
 	}
 
-	providerType := parsed.Query().Get(typeQueryName)
-	if providerType == "" {
-		return "", "", fmt.Errorf("%q uri must include a non-empty %q query parameter", uri, typeQueryName)
-	}
-
 	objectName := objectNameFromURL(parsed)
 	objectName, err = url.PathUnescape(objectName)
 	if err != nil {
@@ -150,7 +145,7 @@ func parseURI(uri string) (string, string, error) {
 	if objectName == "" {
 		return "", "", fmt.Errorf("%q uri must include a non-empty object name", uri)
 	}
-
+	providerType := parsed.Query().Get(typeQueryName)
 	return providerType, objectName, nil
 }
 
