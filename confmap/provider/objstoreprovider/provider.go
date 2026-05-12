@@ -62,10 +62,13 @@ func newObjstoreBucket(providerType string, config []byte) (objectStoreBucket, e
 		return nil, fmt.Errorf("failed to parse objstore config: %w", err)
 	}
 
-	if providerType != "" {
+	if providerType != "" && providerConfig.Type != "" {
 		if !strings.EqualFold(string(providerConfig.Type), providerType) {
 			return nil, fmt.Errorf("objstore config type %q does not match type %q in URI", providerConfig.Type, providerType)
 		}
+	}
+
+	if providerType != "" {
 		providerConfig.Type = objstore.ObjProvider(providerType)
 	}
 
