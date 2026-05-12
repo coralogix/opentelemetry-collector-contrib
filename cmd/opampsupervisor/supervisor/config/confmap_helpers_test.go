@@ -33,6 +33,18 @@ func TestRetrieveURIForProvider(t *testing.T) {
 			wantProvider: "file",
 		},
 		{
+			name:         "absolute path is file",
+			uri:          "/etc/otel/configs.prod.yaml",
+			wantURI:      "file:/etc/otel/configs.prod.yaml",
+			wantProvider: "file",
+		},
+		{
+			name:         "relative path is file",
+			uri:          "./config.prod.yaml",
+			wantURI:      "file:./config.prod.yaml",
+			wantProvider: "file",
+		},
+		{
 			name:         "s3 URI keeps s3 scheme",
 			uri:          "s3://bucket.s3.us-east-1.amazonaws.com/config.yaml",
 			wantURI:      "s3://bucket.s3.us-east-1.amazonaws.com/config.yaml",
