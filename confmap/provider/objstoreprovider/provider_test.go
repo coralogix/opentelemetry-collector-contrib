@@ -43,6 +43,16 @@ func (b *testBucket) Close() error {
 	return nil
 }
 
+func writeFilesystemObjstoreConfig(t *testing.T, bucketDir string) string {
+	configPath := filepath.Join(t.TempDir(), "objstore.yaml")
+	require.NoError(t, os.WriteFile(configPath, fmt.Appendf(nil, `
+type: FILESYSTEM
+config:
+  directory: %q
+`, bucketDir), 0o600))
+	return configPath
+}
+
 func TestRetrieveFromFilesystemBucket(t *testing.T) {
 	bucketDir := t.TempDir()
 	configDir := filepath.Join(bucketDir, "configs")
@@ -59,11 +69,7 @@ service:
       exporters: [nop]
 `), 0o600))
 
-	configPath := filepath.Join(t.TempDir(), "objstore.yaml")
-	require.NoError(t, os.WriteFile(configPath, fmt.Appendf(nil, `
-directory: %q
-`, bucketDir), 0o600))
-	t.Setenv(configPathEnvVar, configPath)
+	t.Setenv(configPathEnvVar, writeFilesystemObjstoreConfig(t, bucketDir))
 
 	fp := NewFactory().Create(confmap.ProviderSettings{})
 	retrieved, err := fp.Retrieve(
@@ -99,11 +105,7 @@ service:
       exporters: [nop]
 `), 0o600))
 
-	configPath := filepath.Join(t.TempDir(), "objstore.yaml")
-	require.NoError(t, os.WriteFile(configPath, fmt.Appendf(nil, `
-directory: %q
-`, bucketDir), 0o600))
-	t.Setenv(configPathEnvVar, configPath)
+	t.Setenv(configPathEnvVar, writeFilesystemObjstoreConfig(t, bucketDir))
 
 	resolver, err := confmap.NewResolver(confmap.ResolverSettings{
 		URIs:              []string{"objstore:configs/otel.yaml?type=filesystem"},
@@ -142,6 +144,25 @@ func TestRetrieveUsesConfigFileAndObjectName(t *testing.T) {
 	raw, err := retrieved.AsRaw()
 	require.NoError(t, err)
 	assert.Contains(t, raw, "receivers")
+}
+
+func TestNewObjstoreBucketValidatesConfigType(t *testing.T) {
+	bucketDir := t.TempDir()
+
+	bucket, err := newObjstoreBucket("filesystem", fmt.Appendf(nil, `
+type: FILESYSTEM
+config:
+  directory: %q
+`, bucketDir))
+	require.NoError(t, err)
+	require.NoError(t, bucket.Close())
+
+	_, err = newObjstoreBucket("s3", fmt.Appendf(nil, `
+type: FILESYSTEM
+config:
+  directory: %q
+`, bucketDir))
+	require.ErrorContains(t, err, `objstore config type "FILESYSTEM" does not match type "s3" in URI`)
 }
 
 func TestRetrieveErrors(t *testing.T) {

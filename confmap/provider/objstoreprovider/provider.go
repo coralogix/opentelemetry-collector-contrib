@@ -57,15 +57,24 @@ func newProvider(confmap.ProviderSettings) confmap.Provider {
 }
 
 func newObjstoreBucket(providerType string, config []byte) (objectStoreBucket, error) {
-	var providerConfig any
+	var providerConfig client.BucketConfig
 	if err := yaml.Unmarshal(config, &providerConfig); err != nil {
 		return nil, fmt.Errorf("failed to parse objstore config: %w", err)
 	}
 
-	return client.NewBucketFromConfig(log.NewNopLogger(), &client.BucketConfig{
-		Type:   objstore.ObjProvider(providerType),
-		Config: providerConfig,
-	}, componentName, nil)
+	if providerType != "" {
+		if !strings.EqualFold(string(providerConfig.Type), providerType) {
+			return nil, fmt.Errorf("objstore config type %q does not match type %q in URI", providerConfig.Type, providerType)
+		}
+		providerConfig.Type = objstore.ObjProvider(providerType)
+	}
+
+	return client.NewBucketFromConfig(
+		log.NewNopLogger(),
+		&providerConfig,
+		componentName,
+		nil,
+	)
 }
 
 func (p *provider) Retrieve(ctx context.Context, uri string, _ confmap.WatcherFunc) (*confmap.Retrieved, error) {
