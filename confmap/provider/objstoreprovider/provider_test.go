@@ -170,6 +170,12 @@ config:
   directory: %q
 `, bucketDir))
 	require.ErrorContains(t, err, `objstore config type "FILESYSTEM" does not match type "s3" in URI`)
+
+	_, err = newObjstoreBucket("", fmt.Appendf(nil, `
+config:
+  directory: %q
+`, bucketDir))
+	require.Error(t, err)
 }
 
 func TestRetrieveErrors(t *testing.T) {
@@ -274,6 +280,12 @@ func TestParseURI(t *testing.T) {
 			name:       "escaped object name",
 			uri:        "objstore:" + url.PathEscape("configs/nested otel.yaml") + "?type=filesystem",
 			provider:   "filesystem",
+			objectName: "configs/nested otel.yaml",
+		},
+		{
+			name:       "no type on uri (would fallback to config type)",
+			uri:        "objstore:" + url.PathEscape("configs/nested otel.yaml"),
+			provider:   "",
 			objectName: "configs/nested otel.yaml",
 		},
 	}
