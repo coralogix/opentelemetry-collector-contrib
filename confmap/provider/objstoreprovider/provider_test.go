@@ -157,6 +157,13 @@ config:
 	require.NoError(t, err)
 	require.NoError(t, bucket.Close())
 
+	bucket, err = newObjstoreBucket("filesystem", fmt.Appendf(nil, `
+config:
+  directory: %q
+`, bucketDir))
+	require.NoError(t, err)
+	require.NoError(t, bucket.Close())
+
 	_, err = newObjstoreBucket("s3", fmt.Appendf(nil, `
 type: FILESYSTEM
 config:
