@@ -7,7 +7,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.32.16
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.15
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.100.0
-	github.com/coralogix/opentelemetry-collector-contrib/confmap/provider/objstoreprovider v0.0.0-20260512163053-000e4515ba3f
+	github.com/coralogix/opentelemetry-collector-contrib/confmap/provider/objstoreprovider v0.0.0-20260512170653-31403a588499
 	github.com/google/uuid v1.6.0
 	github.com/open-telemetry/opamp-go v0.23.0
 	github.com/open-telemetry/opentelemetry-collector-contrib/confmap/provider/s3provider v0.151.0
