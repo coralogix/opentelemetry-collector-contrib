@@ -131,12 +131,45 @@ extensions:
 `), 0o600))
 
 	objstoreConfigPath := filepath.Join(t.TempDir(), "objstore.yaml")
-	require.NoError(t, os.WriteFile(objstoreConfigPath, fmt.Appendf(nil, "directory: %q\n", bucketDir), 0o600))
+	require.NoError(t, os.WriteFile(objstoreConfigPath, fmt.Appendf(nil, `
+type: FILESYSTEM
+config:
+  directory: %q
+`, bucketDir), 0o600))
 	t.Setenv("OBJSTORE_CONFIG_PATH", objstoreConfigPath)
 
-	conf, err := RetrieveURIAsConf("objstore:configs/otel.yaml?type=filesystem", nil)
+	configWithQuery, err := RetrieveURIAsConf("objstore:configs/otel.yaml?type=filesystem", nil)
 	require.NoError(t, err)
-	require.Equal(t, "localhost:13134", conf.Get("extensions::health_check/objstore::endpoint"))
+	require.Equal(t, "localhost:13134", configWithQuery.Get("extensions::health_check/objstore::endpoint"))
+
+	confWithoutQuery, err := RetrieveURIAsConf("objstore:configs/otel.yaml", nil)
+	require.NoError(t, err)
+	require.Equal(t, "localhost:13134", confWithoutQuery.Get("extensions::health_check/objstore::endpoint"))
+}
+
+func TestRetrieveURIAsConf_ObjstoreURI_NoConfigType(t *testing.T) {
+	bucketDir := t.TempDir()
+	configDir := filepath.Join(bucketDir, "configs")
+	require.NoError(t, os.MkdirAll(configDir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "otel.yaml"), []byte(`
+extensions:
+  health_check/objstore:
+    endpoint: localhost:13134
+`), 0o600))
+
+	objstoreConfigPath := filepath.Join(t.TempDir(), "objstore.yaml")
+	require.NoError(t, os.WriteFile(objstoreConfigPath, fmt.Appendf(nil, `
+config:
+  directory: %q
+`, bucketDir), 0o600))
+	t.Setenv("OBJSTORE_CONFIG_PATH", objstoreConfigPath)
+
+	configWithQuery, err := RetrieveURIAsConf("objstore:configs/otel.yaml?type=filesystem", nil)
+	require.NoError(t, err)
+	require.Equal(t, "localhost:13134", configWithQuery.Get("extensions::health_check/objstore::endpoint"))
+
+	_, err = RetrieveURIAsConf("objstore:configs/otel.yaml", nil)
+	require.Error(t, err)
 }
 
 func TestResolveURIs_ExpandsEnvByDefaultScheme(t *testing.T) {
