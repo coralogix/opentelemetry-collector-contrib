@@ -696,7 +696,8 @@ func writeValidateStub(t *testing.T, requiredSubstring, forbiddenSubstring strin
 		script = append(script, "grep -q '"+forbiddenSubstring+"' \"$cfg\" && exit 1")
 	}
 	script = append(script, "exit 0")
-	require.NoError(t, os.WriteFile(path, []byte(strings.Join(script, "\n")+"\n"), 0o700))
+	require.NoError(t, os.WriteFile(path, []byte(strings.Join(script, "\n")+"\n"), 0o600))
+	require.NoError(t, os.Chmod(path, 0o700))
 
 	return path
 }

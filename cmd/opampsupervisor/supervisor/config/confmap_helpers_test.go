@@ -81,7 +81,7 @@ func TestRetrieveURIAsConf_EnvURIWithoutLogger_DoesNotPanic(t *testing.T) {
 		require.NoError(t, os.Unsetenv(envVar))
 		t.Cleanup(func() {
 			if wasSet {
-				_ = os.Setenv(envVar, originalValue)
+				t.Setenv(envVar, originalValue)
 				return
 			}
 			_ = os.Unsetenv(envVar)

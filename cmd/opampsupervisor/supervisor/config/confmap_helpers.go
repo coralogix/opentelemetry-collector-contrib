@@ -13,22 +13,24 @@ import (
 	"strings"
 
 	"github.com/coralogix/opentelemetry-collector-contrib/confmap/provider/objstoreprovider"
-	"github.com/open-telemetry/opentelemetry-collector-contrib/confmap/provider/s3provider"
-
 	"go.opentelemetry.io/collector/confmap"
 	"go.opentelemetry.io/collector/confmap/provider/envprovider"
 	"go.opentelemetry.io/collector/confmap/provider/fileprovider"
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
+
+	"github.com/open-telemetry/opentelemetry-collector-contrib/confmap/provider/s3provider"
 )
 
-var configURISchemeRegexp = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]+:`)
-var providerSchemes = map[string]struct{}{
-	"file":     {},
-	"env":      {},
-	"s3":       {},
-	"objstore": {},
-}
+var (
+	configURISchemeRegexp = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]+:`)
+	providerSchemes       = map[string]struct{}{
+		"file":     {},
+		"env":      {},
+		"s3":       {},
+		"objstore": {},
+	}
+)
 
 func normalizeConfigURI(uri string) string {
 	if configURISchemeRegexp.MatchString(uri) {
