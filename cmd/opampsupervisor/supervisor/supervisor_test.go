@@ -584,7 +584,8 @@ service:
                 - stderr
             output_paths:
                 - stdout
-        resource: null
+        resource:
+            service.instance.id: 018fee23-4a51-7303-a441-73faed7d9deb
 `
 
 		remoteConfig := &protobufs.AgentRemoteConfig{
@@ -685,7 +686,8 @@ service:
                 - stderr
             output_paths:
                 - stdout
-        resource: null
+        resource:
+            service.instance.id: 018fee23-4a51-7303-a441-73faed7d9deb
 `
 
 		remoteConfig := &protobufs.AgentRemoteConfig{
@@ -871,7 +873,8 @@ service:
                 - stderr
             output_paths:
                 - stdout
-        resource: null
+        resource:
+            service.instance.id: 018fee23-4a51-7303-a441-73faed7d9deb
 `
 
 		// store the initial remote config message so the supervisor is initialized with it
@@ -1752,6 +1755,7 @@ service:
                             endpoint: localhost-metrics
                             protocol: http/protobuf
         resource:
+            service.instance.id: 018fee23-4a51-7303-a441-73faed7d9deb
             service.name: otelcol
         traces:
             processors:
@@ -1871,6 +1875,9 @@ service:
                 - nop
             receivers:
                 - nop
+    telemetry:
+        resource:
+            service.instance.id: 018fee23-4a51-7303-a441-73faed7d9deb
 `
 	s := Supervisor{
 		persistentState: &persistentState{
@@ -1914,6 +1921,9 @@ service:
                 - nop
             receivers:
                 - nop
+    telemetry:
+        resource:
+            service.instance.id: 018fee23-4a51-7303-a441-73faed7d9deb
 `
 	s := Supervisor{
 		persistentState: &persistentState{
@@ -2379,6 +2389,7 @@ service:
             output_paths:
                 - stdout
         resource:
+            service.instance.id: 018fee23-4a51-7303-a441-73faed7d9deb
             service.name: otelcol
 `
 
@@ -2421,6 +2432,7 @@ service:
                         otlp:
                             endpoint: http://localhost:4318
         resource:
+            service.instance.id: 018fee23-4a51-7303-a441-73faed7d9deb
             service.name: otelcol
 `
 
