@@ -233,6 +233,7 @@ components:
     - processor/vultrdetector
     - provider/aes
     - provider/googlesecretmanager
+    - provider/objstore
     - provider/s3
     - provider/secretsmanager
     - receiver/active_directory_ds

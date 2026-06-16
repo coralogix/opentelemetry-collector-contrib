@@ -131,6 +131,7 @@ components:
     provider:
         - aes
         - googlesecretmanager
+        - objstore
         - s3
         - secretsmanager
     receiver:

@@ -3,6 +3,7 @@ pkg/pdatautil
 pkg/golden
 pkg/pdatatest
 cmd/golden
+confmap/provider/s3provider
 extension/internal/basicauth
 extension/internal/credentialsfile
 extension/basicauthextension
@@ -70,7 +71,6 @@ cmd/telemetrygen
 cmd/telemetrygen/internal/e2etest
 confmap/provider/aesprovider
 confmap/provider/googlesecretmanagerprovider
-confmap/provider/s3provider
 confmap/provider/secretsmanagerprovider
 internal/filter
 connector/countconnector
