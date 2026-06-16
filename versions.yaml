@@ -3,7 +3,7 @@
 
 module-sets:
   contrib-base:
-    version: v0.152.0
+    version: v0.153.0
     modules:
       - github.com/open-telemetry/opentelemetry-collector-contrib
       - github.com/open-telemetry/opentelemetry-collector-contrib/cmd/golden
@@ -12,6 +12,7 @@ module-sets:
       - github.com/open-telemetry/opentelemetry-collector-contrib/cmd/codecovgen
       - github.com/open-telemetry/opentelemetry-collector-contrib/cmd/schemagen
       - github.com/open-telemetry/opentelemetry-collector-contrib/confmap/provider/aesprovider
+      - github.com/coralogix/opentelemetry-collector-contrib/confmap/provider/objstoreprovider
       - github.com/open-telemetry/opentelemetry-collector-contrib/confmap/provider/s3provider
       - github.com/open-telemetry/opentelemetry-collector-contrib/confmap/provider/secretsmanagerprovider
       - github.com/open-telemetry/opentelemetry-collector-contrib/confmap/provider/googlesecretmanagerprovider
@@ -85,6 +86,7 @@ module-sets:
       - github.com/open-telemetry/opentelemetry-collector-contrib/extension/azureauthextension
       - github.com/open-telemetry/opentelemetry-collector-contrib/extension/basicauthextension
       - github.com/open-telemetry/opentelemetry-collector-contrib/extension/bearertokenauthextension
+      - github.com/open-telemetry/opentelemetry-collector-contrib/extension/internal/basicauth
       - github.com/open-telemetry/opentelemetry-collector-contrib/extension/internal/credentialsfile
       - github.com/open-telemetry/opentelemetry-collector-contrib/extension/cgroupruntimeextension
       - github.com/open-telemetry/opentelemetry-collector-contrib/extension/datadogextension

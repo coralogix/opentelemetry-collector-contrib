@@ -26,6 +26,7 @@ body:
       - cmd/telemetrygen
       - confmap/provider/aesprovider
       - confmap/provider/googlesecretmanagerprovider
+      - confmap/provider/objstoreprovider
       - confmap/provider/s3provider
       - confmap/provider/secretsmanagerprovider
       - connector/count
@@ -242,6 +243,7 @@ body:
       - processor/sumologic
       - processor/tailsampling
       - processor/transform
+      - processor/transform/internal/logparsingfuncs
       - processor/unroll
       - receiver/activedirectoryds
       - receiver/aerospike
