@@ -683,33 +683,7 @@ func (s *Supervisor) startOpAMPClient() error {
 		InstanceUid:        types.InstanceUid(s.persistentState.InstanceID),
 		RemoteConfigStatus: s.persistentState.GetLastRemoteConfigStatus(),
 		Callbacks: types.Callbacks{
-			OnConnect: func(context.Context) {
-				opampBackendConnected := s.initialOpampConnSuccess.CompareAndSwap(false, true)
-				if !opampBackendConnected {
-					return
-				}
-				s.telemetrySettings.Logger.Info("Connected to the OpAMP server.")
-
-				s.configWriteMu.Lock()
-				defer s.configWriteMu.Unlock()
-				fallbackEnabled := s.config.Agent.FallbackEnabled()
-				if !fallbackEnabled {
-					return
-				}
-				err := s.loadAndWriteInitialMergedConfig()
-				if err != nil {
-					s.telemetrySettings.Logger.Error("failed loading initial config", zap.Error(err))
-					return
-				}
-				if err := s.waitForAgentReady(); err != nil {
-					s.telemetrySettings.Logger.Debug("Agent not ready before config update; skipping signal", zap.Error(err))
-					return
-				}
-				select {
-				case s.hasNewConfig <- struct{}{}:
-				default:
-				}
-			},
+			OnConnect: s.onConnect,
 			OnConnectFailed: func(_ context.Context, err error) {
 				s.telemetrySettings.Logger.Error("Failed to connect to the OpAMP server", zap.Error(err))
 			},
@@ -1055,6 +1029,35 @@ func (*Supervisor) getHeadersFromSettings(protoHeaders *protobufs.Headers) http.
 	return headers
 }
 
+func (s *Supervisor) onConnect(ctx context.Context) {
+	opampBackendConnected := s.initialOpampConnSuccess.CompareAndSwap(false, true)
+	if !opampBackendConnected {
+		return
+	}
+	s.telemetrySettings.Logger.Info("Connected to the OpAMP server.")
+	s.metrics.SetCollectorFallbackStatus(ctx, false)
+
+	s.configWriteMu.Lock()
+	defer s.configWriteMu.Unlock()
+	fallbackEnabled := s.config.Agent.FallbackEnabled()
+	if !fallbackEnabled {
+		return
+	}
+	err := s.loadAndWriteInitialMergedConfig()
+	if err != nil {
+		s.telemetrySettings.Logger.Error("failed loading initial config", zap.Error(err))
+		return
+	}
+	if err := s.waitForAgentReady(); err != nil {
+		s.telemetrySettings.Logger.Debug("Agent not ready before config update; skipping signal", zap.Error(err))
+		return
+	}
+	select {
+	case s.hasNewConfig <- struct{}{}:
+	default:
+	}
+}
+
 func (s *Supervisor) onOpampConnectionSettings(_ context.Context, settings *protobufs.OpAMPConnectionSettings) error {
 	if settings == nil {
 		s.telemetrySettings.Logger.Debug("Received ConnectionSettings request with nil settings")
@@ -1338,6 +1341,7 @@ func (s *Supervisor) loadAndWriteInitialMergedConfig() error {
 		if err != nil {
 			return fmt.Errorf("could not switch to fallback config: %w", err)
 		}
+		s.metrics.SetCollectorFallbackStatus(s.runCtx, true)
 		return nil
 	}
 
