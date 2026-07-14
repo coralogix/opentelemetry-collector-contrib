@@ -389,7 +389,7 @@ func escapePathStringForWin(path string) string {
 }
 
 // This test ensures the Supervisor config validation path can validate
-// agent::startup_fallback_configs by executing the real Collector binary with:
+// agent::initial_fallback_configs by executing the real Collector binary with:
 //
 //	<collector> validate --config <cfg1> [--config <cfg2> ...]
 //
@@ -411,11 +411,27 @@ func TestValidateFallbackConfigsWithColBin_E2E(t *testing.T) {
 		cfgFile := getSupervisorConfig(t, "fallback", map[string]string{
 			"url":                     "localhost:12345",
 			"storage_dir":             t.TempDir(),
-			"startup_fallback_config": escapePathStringForWin(goodColConfigPath),
+			"initial_fallback_config": escapePathStringForWin(goodColConfigPath),
 		})
 
 		cfg, err := config.Load(cfgFile.Name())
 		require.NoError(t, err)
+		_, err = supervisor.NewSupervisor(t.Context(), zap.NewNop(), cfg)
+		require.NoError(t, err)
+	})
+
+	t.Run("Valid profiles fallback config using agent feature gates", func(t *testing.T) {
+		profilesConfigPath := filepath.Join("testdata", "collector", "profiles_pipeline.yaml")
+		cfgFile := getSupervisorConfig(t, "fallback", map[string]string{
+			"url":                     "localhost:12345",
+			"storage_dir":             t.TempDir(),
+			"agent_argument":          "--feature-gates=+service.profilesSupport",
+			"initial_fallback_config": escapePathStringForWin(profilesConfigPath),
+		})
+
+		cfg, err := config.Load(cfgFile.Name())
+		require.NoError(t, err)
+		require.Equal(t, []string{"--feature-gates=+service.profilesSupport"}, cfg.Agent.Arguments)
 		_, err = supervisor.NewSupervisor(t.Context(), zap.NewNop(), cfg)
 		require.NoError(t, err)
 	})
@@ -425,13 +441,13 @@ func TestValidateFallbackConfigsWithColBin_E2E(t *testing.T) {
 		badCfgFile := getSupervisorConfig(t, "fallback", map[string]string{
 			"url":                     "localhost:12345",
 			"storage_dir":             t.TempDir(),
-			"startup_fallback_config": escapePathStringForWin(badColConfigPath),
+			"initial_fallback_config": escapePathStringForWin(badColConfigPath),
 		})
 
 		cfg, err := config.Load(badCfgFile.Name())
 		require.NoError(t, err)
 		_, err = supervisor.NewSupervisor(t.Context(), zap.NewNop(), cfg)
-		require.ErrorContains(t, err, "could not validate startup fallback configs with agent::executable")
+		require.ErrorContains(t, err, "could not validate initial fallback configs with agent::executable")
 	})
 }
 
@@ -810,7 +826,7 @@ func TestSupervisorStartsCollectorWithNoOpAMPServerUsingLastRemoteConfig(t *test
 			extraConfigData := map[string]string{
 				"url":                     server.addr,
 				"storage_dir":             storageDir,
-				"startup_fallback_config": escapePathStringForWin(fallbackConfigPath),
+				"initial_fallback_config": escapePathStringForWin(fallbackConfigPath),
 			}
 			if mode.UseHUPConfigReload {
 				extraConfigData["use_hup_config_reload"] = "true"
@@ -3080,7 +3096,7 @@ func TestSupervisorFallbackWhenNoPersistedConfig(t *testing.T) {
 		"url":                     server.addr,
 		"storage_dir":             storageDir,
 		"local_config":            localConfigPath,
-		"startup_fallback_config": escapePathStringForWin(fallbackConfigPath),
+		"initial_fallback_config": escapePathStringForWin(fallbackConfigPath),
 	})
 
 	require.NoError(t, s.Start(t.Context()))
@@ -3145,7 +3161,7 @@ func TestSupervisorFallbackDisablesAfterFirstConnect(t *testing.T) {
 		"url":                     server.addr,
 		"storage_dir":             storageDir,
 		"local_config":            localConfigPath,
-		"startup_fallback_config": escapePathStringForWin(fallbackConfigPath),
+		"initial_fallback_config": escapePathStringForWin(fallbackConfigPath),
 	})
 
 	require.NoError(t, s.Start(t.Context()))
@@ -3593,8 +3609,8 @@ func enableExtensionsFeatureGate(t *testing.T) {
 }
 
 // supervisorBinarySizeLimitBytes is the size budget for the supervisor binary,
-// in bytes. 24 MiB.
-const supervisorBinarySizeLimitBytes = 24 * 1024 * 1024
+// in bytes. This fork includes S3 and objstore providers, which link cloud SDKs.
+const supervisorBinarySizeLimitBytes = 64 * 1024 * 1024
 
 // TestSupervisorBinarySize guards against unintended growth of the supervisor
 // binary. It builds the supervisor with the same flags used for release

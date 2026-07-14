@@ -332,6 +332,8 @@ func (a Agent) validateFallbackConfigsWithColBin() error {
 	}
 
 	cfgValidateCommand := []string{a.Executable, "validate", "--config", tmpCfgPath}
+	cfgValidateCommand = append(cfgValidateCommand, a.Arguments...)
+
 	cmd := exec.Command(cfgValidateCommand[0], cfgValidateCommand[1:]...) // #nosec G204
 
 	cmd.Stdout = os.Stdout

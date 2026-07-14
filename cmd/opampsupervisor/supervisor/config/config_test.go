@@ -791,6 +791,19 @@ func TestOpAMPServer_OpaqueHeaders(t *testing.T) {
 }
 
 func TestAgent_validateFallbackConfigsWithColBin(t *testing.T) {
+	t.Run("validates a profiles pipeline using feature gates from agent arguments", func(t *testing.T) {
+		validateStub := writeValidateStub(t, "profiles:", "processors:", "--feature-gates=+service.profilesSupport")
+		fallbackPath := filepath.Join("..", "..", "testdata", "collector", "profiles_pipeline.yaml")
+
+		agent := Agent{
+			Executable:             validateStub,
+			Arguments:              []string{"--feature-gates=+service.profilesSupport"},
+			InitialFallbackConfigs: []string{fallbackPath},
+		}
+
+		require.NoError(t, agent.validateFallbackConfigsWithColBin())
+	})
+
 	t.Run("uses the first readable fallback config", func(t *testing.T) {
 		validateStub := writeValidateStub(t, "nop:", "logging:")
 		firstPath := writeFallbackConfig(t, "first.yaml", "exporters:\n  nop:\n")
@@ -844,7 +857,7 @@ func writeFallbackConfig(t *testing.T, fileName, contents string) string {
 	return path
 }
 
-func writeValidateStub(t *testing.T, requiredSubstring, forbiddenSubstring string) string {
+func writeValidateStub(t *testing.T, requiredSubstring, forbiddenSubstring string, requiredArg ...string) string {
 	t.Helper()
 
 	tempDir := t.TempDir()
@@ -855,6 +868,18 @@ func writeValidateStub(t *testing.T, requiredSubstring, forbiddenSubstring strin
 			"set CFG=%3",
 			"findstr /C:\"" + requiredSubstring + "\" \"%CFG%\" >nul",
 			"if errorlevel 1 exit /b 1",
+		}
+		if len(requiredArg) > 0 {
+			// cmd.exe uses "=" as a delimiter when assigning batch parameters.
+			name, value, hasValue := strings.Cut(requiredArg[0], "=")
+			if hasValue {
+				script = append(script,
+					"if not \"%4\"==\""+name+"\" exit /b 1",
+					"if not \"%5\"==\""+value+"\" exit /b 1",
+				)
+			} else {
+				script = append(script, "if not \"%4\"==\""+name+"\" exit /b 1")
+			}
 		}
 		if forbiddenSubstring != "" {
 			script = append(script,
@@ -872,6 +897,9 @@ func writeValidateStub(t *testing.T, requiredSubstring, forbiddenSubstring strin
 		"#!/bin/sh",
 		"cfg=\"$3\"",
 		"grep -q '" + requiredSubstring + "' \"$cfg\" || exit 1",
+	}
+	if len(requiredArg) > 0 {
+		script = append(script, "[ \"$4\" = '"+requiredArg[0]+"' ] || exit 1")
 	}
 	if forbiddenSubstring != "" {
 		script = append(script, "grep -q '"+forbiddenSubstring+"' \"$cfg\" && exit 1")

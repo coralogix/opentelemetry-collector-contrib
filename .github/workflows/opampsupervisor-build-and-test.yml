@@ -1,0 +1,52 @@
+name: opampsupervisor-build-and-test
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "**/README.md"
+  merge_group:
+  pull_request:
+    paths-ignore:
+      - "**/README.md"
+
+permissions:
+  contents: read
+
+env:
+  # Make sure to exit early if cache segment download times out after 2 minutes.
+  # We limit cache download as a whole to 5 minutes.
+  SEGMENT_DOWNLOAD_TIMEOUT_MINS: 2
+
+# Do not cancel this workflow on main. See https://github.com/open-telemetry/opentelemetry-collector-contrib/pull/16616
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: ./.github/actions/setup-go-tools
+        with:
+          go-version: oldstable
+      - name: Run opampsupervisor unit tests
+        working-directory: cmd/opampsupervisor
+        run: make test
+      - run: ./.github/workflows/scripts/check-disk-space.sh
+
+  e2e-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: ./.github/actions/setup-go-tools
+        with:
+          go-version: oldstable
+      - name: Run opampsupervisor e2e tests
+        working-directory: cmd/opampsupervisor
+        run: make e2e-test
+      - run: ./.github/workflows/scripts/check-disk-space.sh
