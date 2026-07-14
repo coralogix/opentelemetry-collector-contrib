@@ -870,7 +870,16 @@ func writeValidateStub(t *testing.T, requiredSubstring, forbiddenSubstring strin
 			"if errorlevel 1 exit /b 1",
 		}
 		if len(requiredArg) > 0 {
-			script = append(script, "if not \"%4\"==\""+requiredArg[0]+"\" exit /b 1")
+			// cmd.exe uses "=" as a delimiter when assigning batch parameters.
+			name, value, hasValue := strings.Cut(requiredArg[0], "=")
+			if hasValue {
+				script = append(script,
+					"if not \"%4\"==\""+name+"\" exit /b 1",
+					"if not \"%5\"==\""+value+"\" exit /b 1",
+				)
+			} else {
+				script = append(script, "if not \"%4\"==\""+name+"\" exit /b 1")
+			}
 		}
 		if forbiddenSubstring != "" {
 			script = append(script,
