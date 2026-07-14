@@ -826,7 +826,7 @@ func TestSupervisorStartsCollectorWithNoOpAMPServerUsingLastRemoteConfig(t *test
 			extraConfigData := map[string]string{
 				"url":                     server.addr,
 				"storage_dir":             storageDir,
-				"startup_fallback_config": escapePathStringForWin(fallbackConfigPath),
+				"initial_fallback_config": escapePathStringForWin(fallbackConfigPath),
 			}
 			if mode.UseHUPConfigReload {
 				extraConfigData["use_hup_config_reload"] = "true"
@@ -3096,7 +3096,7 @@ func TestSupervisorFallbackWhenNoPersistedConfig(t *testing.T) {
 		"url":                     server.addr,
 		"storage_dir":             storageDir,
 		"local_config":            localConfigPath,
-		"startup_fallback_config": escapePathStringForWin(fallbackConfigPath),
+		"initial_fallback_config": escapePathStringForWin(fallbackConfigPath),
 	})
 
 	require.NoError(t, s.Start(t.Context()))
@@ -3161,7 +3161,7 @@ func TestSupervisorFallbackDisablesAfterFirstConnect(t *testing.T) {
 		"url":                     server.addr,
 		"storage_dir":             storageDir,
 		"local_config":            localConfigPath,
-		"startup_fallback_config": escapePathStringForWin(fallbackConfigPath),
+		"initial_fallback_config": escapePathStringForWin(fallbackConfigPath),
 	})
 
 	require.NoError(t, s.Start(t.Context()))
