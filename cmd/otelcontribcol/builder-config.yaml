@@ -291,4 +291,3 @@ providers:
 # file before passing it to OCB, to ensure that local versions are used for all
 # Contrib modules.
 replaces:
-  - github.com/coralogix/opentelemetry-collector-contrib/confmap/provider/objstoreprovider => ../../confmap/provider/objstoreprovider
