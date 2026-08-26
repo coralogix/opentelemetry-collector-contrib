@@ -79,11 +79,12 @@ func TestValidate(t *testing.T) {
 					TLS: tlsConfig,
 				},
 				Agent: Agent{
-					Executable:              "${file_path}",
-					OrphanDetectionInterval: 5 * time.Second,
-					ConfigApplyTimeout:      2 * time.Second,
-					BootstrapTimeout:        5 * time.Second,
-					UseHUPConfigReload:      false,
+					Executable:                  "${file_path}",
+					OrphanDetectionInterval:     5 * time.Second,
+					ConfigApplyTimeout:          2 * time.Second,
+					BootstrapTimeout:            5 * time.Second,
+					CollectorCrashLogSnippetKiB: 0,
+					UseHUPConfigReload:          false,
 				},
 				Capabilities: Capabilities{
 					AcceptsRemoteConfig: true,
@@ -268,6 +269,58 @@ func TestValidate(t *testing.T) {
 				},
 			},
 			expectedErrorFunc: simpleError("agent::orphan_detection_interval must be positive"),
+		},
+		{
+			name: "Invalid collector crash log snippet KiB",
+			config: Supervisor{
+				Server: OpAMPServer{
+					Endpoint: "wss://localhost:9090/opamp",
+					Headers: http.Header{
+						"Header1": []string{"HeaderValue"},
+					},
+					TLS: tlsConfig,
+				},
+				Agent: Agent{
+					Executable:                  "${file_path}",
+					OrphanDetectionInterval:     5 * time.Second,
+					ConfigApplyTimeout:          2 * time.Second,
+					BootstrapTimeout:            5 * time.Second,
+					CollectorCrashLogSnippetKiB: -1,
+				},
+				Capabilities: Capabilities{
+					AcceptsRemoteConfig: true,
+				},
+				Storage: Storage{
+					Directory: "/etc/opamp-supervisor/storage",
+				},
+			},
+			expectedErrorFunc: simpleError("agent::collector_crash_log_snippet_kib must be non-negative"),
+		},
+		{
+			name: "collector crash log snippet KiB too large",
+			config: Supervisor{
+				Server: OpAMPServer{
+					Endpoint: "wss://localhost:9090/opamp",
+					Headers: http.Header{
+						"Header1": []string{"HeaderValue"},
+					},
+					TLS: tlsConfig,
+				},
+				Agent: Agent{
+					Executable:                  "${file_path}",
+					OrphanDetectionInterval:     5 * time.Second,
+					ConfigApplyTimeout:          2 * time.Second,
+					BootstrapTimeout:            5 * time.Second,
+					CollectorCrashLogSnippetKiB: 1025,
+				},
+				Capabilities: Capabilities{
+					AcceptsRemoteConfig: true,
+				},
+				Storage: Storage{
+					Directory: "/etc/opamp-supervisor/storage",
+				},
+			},
+			expectedErrorFunc: simpleError("agent::collector_crash_log_snippet_kib must be less than or equal to 1024"),
 		},
 		{
 			name: "Zero value health check port number",
@@ -559,6 +612,28 @@ func TestValidate(t *testing.T) {
 				},
 			},
 			expectedErrorFunc: simpleError("healthcheck::endpoint must contain a valid port number, got -1"),
+		},
+		{
+			name: "Package with unsupported verifier type (cosign not yet supported)",
+			config: Supervisor{
+				Server: OpAMPServer{
+					Endpoint: "wss://localhost:9090/opamp",
+					TLS:      tlsConfig,
+				},
+				Agent: Agent{
+					Executable:              "${file_path}",
+					OrphanDetectionInterval: 5 * time.Second,
+					ConfigApplyTimeout:      2 * time.Second,
+					BootstrapTimeout:        5 * time.Second,
+					Package: AgentPackage{
+						Verifier: Verifier{Type: "cosign"},
+					},
+				},
+				Capabilities: Capabilities{AcceptsRemoteConfig: true},
+				Storage:      Storage{Directory: "/etc/opamp-supervisor/storage"},
+				HealthCheck:  defaultHealthCheck,
+			},
+			expectedErrorFunc: simpleError("unsupported verifier type"),
 		},
 	}
 
@@ -948,10 +1023,9 @@ func TestCapabilities_SupportedCapabilities(t *testing.T) {
 			expectedAgentCapabilities: protobufs.AgentCapabilities_AgentCapabilities_ReportsStatus,
 		},
 		{
-			name: "Package capabilities are reported",
+			name: "AcceptsPackages enables both package capabilities",
 			capabilities: Capabilities{
-				AcceptsPackages:        true,
-				ReportsPackageStatuses: true,
+				AcceptsPackages: true,
 			},
 			expectedAgentCapabilities: protobufs.AgentCapabilities_AgentCapabilities_ReportsStatus |
 				protobufs.AgentCapabilities_AgentCapabilities_AcceptsPackages |
@@ -972,7 +1046,6 @@ func TestCapabilities_SupportedCapabilities(t *testing.T) {
 				ReportsAvailableComponents:     true,
 				ReportsHeartbeat:               true,
 				AcceptsPackages:                true,
-				ReportsPackageStatuses:         true,
 			},
 			expectedAgentCapabilities: protobufs.AgentCapabilities_AgentCapabilities_ReportsStatus |
 				protobufs.AgentCapabilities_AgentCapabilities_ReportsEffectiveConfig |
@@ -1033,11 +1106,13 @@ agent:
 					Capabilities: DefaultSupervisor().Capabilities,
 					Storage:      DefaultSupervisor().Storage,
 					Agent: Agent{
-						Executable:              executablePath,
-						OrphanDetectionInterval: DefaultSupervisor().Agent.OrphanDetectionInterval,
-						ConfigApplyTimeout:      DefaultSupervisor().Agent.ConfigApplyTimeout,
-						BootstrapTimeout:        DefaultSupervisor().Agent.BootstrapTimeout,
-						ValidateConfig:          DefaultSupervisor().Agent.ValidateConfig,
+						Executable:                  executablePath,
+						OrphanDetectionInterval:     DefaultSupervisor().Agent.OrphanDetectionInterval,
+						ConfigApplyTimeout:          DefaultSupervisor().Agent.ConfigApplyTimeout,
+						BootstrapTimeout:            DefaultSupervisor().Agent.BootstrapTimeout,
+						CollectorCrashLogSnippetKiB: DefaultSupervisor().Agent.CollectorCrashLogSnippetKiB,
+						ValidateConfig:              DefaultSupervisor().Agent.ValidateConfig,
+						Package:                     DefaultSupervisor().Agent.Package,
 					},
 					Telemetry:   DefaultSupervisor().Telemetry,
 					HealthCheck: DefaultSupervisor().HealthCheck,
@@ -1082,6 +1157,10 @@ agent:
   bootstrap_timeout: 8s
   opamp_server_port: 8090
   passthrough_logs: true
+  automatic_config_rollback: true
+  collector_crash_log_snippet_kib: 100
+  package:
+    agent_binary: custom-otelcol
 
 telemetry:
   logs:
@@ -1125,12 +1204,18 @@ telemetry:
 								"os.type": "darwin",
 							},
 						},
-						OrphanDetectionInterval: 10 * time.Second,
-						ConfigApplyTimeout:      8 * time.Second,
-						BootstrapTimeout:        8 * time.Second,
-						OpAMPServerPort:         8090,
-						PassthroughLogs:         true,
-						ValidateConfig:          DefaultSupervisor().Agent.ValidateConfig,
+						OrphanDetectionInterval:     10 * time.Second,
+						ConfigApplyTimeout:          8 * time.Second,
+						BootstrapTimeout:            8 * time.Second,
+						OpAMPServerPort:             8090,
+						PassthroughLogs:             true,
+						CollectorCrashLogSnippetKiB: 100,
+						AutomaticConfigRollback:     true,
+						ValidateConfig:              DefaultSupervisor().Agent.ValidateConfig,
+						Package: AgentPackage{
+							AgentBinary: "custom-otelcol",
+							Verifier:    DefaultSupervisor().Agent.Package.Verifier,
+						},
 					},
 					Telemetry: Telemetry{
 						Logs: Logs{
@@ -1164,11 +1249,13 @@ agent:
 					Capabilities: DefaultSupervisor().Capabilities,
 					Storage:      DefaultSupervisor().Storage,
 					Agent: Agent{
-						Executable:              executablePath,
-						OrphanDetectionInterval: DefaultSupervisor().Agent.OrphanDetectionInterval,
-						ConfigApplyTimeout:      DefaultSupervisor().Agent.ConfigApplyTimeout,
-						BootstrapTimeout:        DefaultSupervisor().Agent.BootstrapTimeout,
-						ValidateConfig:          DefaultSupervisor().Agent.ValidateConfig,
+						Executable:                  executablePath,
+						OrphanDetectionInterval:     DefaultSupervisor().Agent.OrphanDetectionInterval,
+						ConfigApplyTimeout:          DefaultSupervisor().Agent.ConfigApplyTimeout,
+						BootstrapTimeout:            DefaultSupervisor().Agent.BootstrapTimeout,
+						CollectorCrashLogSnippetKiB: DefaultSupervisor().Agent.CollectorCrashLogSnippetKiB,
+						ValidateConfig:              DefaultSupervisor().Agent.ValidateConfig,
+						Package:                     DefaultSupervisor().Agent.Package,
 					},
 					Telemetry:   DefaultSupervisor().Telemetry,
 					HealthCheck: DefaultSupervisor().HealthCheck,
