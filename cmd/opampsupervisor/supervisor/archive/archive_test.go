@@ -15,6 +15,25 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestFormatFromURL(t *testing.T) {
+	testCases := []struct {
+		url    string
+		format Format
+	}{
+		{url: "https://example.com/otelcol-contrib_0.161.0_linux_amd64.tar.gz", format: FormatTarGzip},
+		{url: "https://example.com/otelcol-contrib.tgz", format: FormatTarGzip},
+		{url: "https://example.com/otelcol-contrib.tar.gz?X-Amz-Signature=abc", format: FormatTarGzip},
+		{url: "https://example.com/download?file=otelcol-contrib.tar.gz", format: FormatNone},
+		{url: "https://example.com/otelcol-contrib", format: FormatNone},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.url, func(t *testing.T) {
+			assert.Equal(t, tc.format, FormatFromURL(tc.url))
+		})
+	}
+}
+
 func TestNewExtractor(t *testing.T) {
 	testCases := []struct {
 		name      string

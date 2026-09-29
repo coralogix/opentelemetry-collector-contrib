@@ -522,7 +522,7 @@ func TestSupervisorStartsCollectorWithRemoteConfig(t *testing.T) {
 			server.sendToSupervisor(&protobufs.ServerToAgent{
 				RemoteConfig: &protobufs.AgentRemoteConfig{
 					Config: &protobufs.AgentConfigMap{
-						ConfigMap: map[string]*protobufs.AgentConfigFile{
+						ConfigMap: map[string]*protobufs.AgentConfigObject{
 							"": {Body: cfg.Bytes()},
 						},
 					},
@@ -828,7 +828,7 @@ func TestSupervisorStartsCollectorWithNoOpAMPServerUsingLastRemoteConfig(t *test
 			cfg, hash, healthcheckPort := createHealthCheckCollectorConf(t, true)
 			remoteConfigProto := &protobufs.AgentRemoteConfig{
 				Config: &protobufs.AgentConfigMap{
-					ConfigMap: map[string]*protobufs.AgentConfigFile{
+					ConfigMap: map[string]*protobufs.AgentConfigObject{
 						"": {Body: cfg.Bytes()},
 					},
 				},
@@ -944,7 +944,7 @@ func TestSupervisorRestartsWithLastWorkingRemoteConfigAfterFailedConfig(t *testi
 			firstServer.sendToSupervisor(&protobufs.ServerToAgent{
 				RemoteConfig: &protobufs.AgentRemoteConfig{
 					Config: &protobufs.AgentConfigMap{
-						ConfigMap: map[string]*protobufs.AgentConfigFile{
+						ConfigMap: map[string]*protobufs.AgentConfigObject{
 							"": {Body: workingCfg.Bytes()},
 						},
 					},
@@ -972,7 +972,7 @@ func TestSupervisorRestartsWithLastWorkingRemoteConfigAfterFailedConfig(t *testi
 			firstServer.sendToSupervisor(&protobufs.ServerToAgent{
 				RemoteConfig: &protobufs.AgentRemoteConfig{
 					Config: &protobufs.AgentConfigMap{
-						ConfigMap: map[string]*protobufs.AgentConfigFile{
+						ConfigMap: map[string]*protobufs.AgentConfigObject{
 							"": {Body: badCfg.Bytes()},
 						},
 					},
@@ -1081,7 +1081,7 @@ func TestSupervisorRestoresLastWorkingRemoteConfigAtRuntimeAfterFailedConfig(t *
 	server.sendToSupervisor(&protobufs.ServerToAgent{
 		RemoteConfig: &protobufs.AgentRemoteConfig{
 			Config: &protobufs.AgentConfigMap{
-				ConfigMap: map[string]*protobufs.AgentConfigFile{
+				ConfigMap: map[string]*protobufs.AgentConfigObject{
 					"": {Body: workingCfg.Bytes()},
 				},
 			},
@@ -1108,7 +1108,7 @@ func TestSupervisorRestoresLastWorkingRemoteConfigAtRuntimeAfterFailedConfig(t *
 	server.sendToSupervisor(&protobufs.ServerToAgent{
 		RemoteConfig: &protobufs.AgentRemoteConfig{
 			Config: &protobufs.AgentConfigMap{
-				ConfigMap: map[string]*protobufs.AgentConfigFile{
+				ConfigMap: map[string]*protobufs.AgentConfigObject{
 					"": {Body: badCfg.Bytes()},
 				},
 			},
@@ -1192,7 +1192,7 @@ agent:
 			server.sendToSupervisor(&protobufs.ServerToAgent{
 				RemoteConfig: &protobufs.AgentRemoteConfig{
 					Config: &protobufs.AgentConfigMap{
-						ConfigMap: map[string]*protobufs.AgentConfigFile{
+						ConfigMap: map[string]*protobufs.AgentConfigObject{
 							"": {Body: workingCfg.Bytes()},
 						},
 					},
@@ -1213,7 +1213,7 @@ agent:
 			server.sendToSupervisor(&protobufs.ServerToAgent{
 				RemoteConfig: &protobufs.AgentRemoteConfig{
 					Config: &protobufs.AgentConfigMap{
-						ConfigMap: map[string]*protobufs.AgentConfigFile{
+						ConfigMap: map[string]*protobufs.AgentConfigObject{
 							"": {Body: badCfg.Bytes()},
 						},
 					},
@@ -1259,7 +1259,7 @@ func TestSupervisorStartsCollectorWithRemoteConfigAndExecParams(t *testing.T) {
 	cfg, hash, healthcheckPort := createHealthCheckCollectorConf(t, false)
 	remoteConfigProto := &protobufs.AgentRemoteConfig{
 		Config: &protobufs.AgentConfigMap{
-			ConfigMap: map[string]*protobufs.AgentConfigFile{
+			ConfigMap: map[string]*protobufs.AgentConfigObject{
 				"": {Body: cfg.Bytes()},
 			},
 		},
@@ -1396,7 +1396,7 @@ func TestSupervisorStartsWithNoOpAMPServer(t *testing.T) {
 	server.sendToSupervisor(&protobufs.ServerToAgent{
 		RemoteConfig: &protobufs.AgentRemoteConfig{
 			Config: &protobufs.AgentConfigMap{
-				ConfigMap: map[string]*protobufs.AgentConfigFile{
+				ConfigMap: map[string]*protobufs.AgentConfigObject{
 					"": {Body: cfg.Bytes()},
 				},
 			},
@@ -1474,7 +1474,7 @@ func TestSupervisorRestartsCollectorAfterBadConfig(t *testing.T) {
 			server.sendToSupervisor(&protobufs.ServerToAgent{
 				RemoteConfig: &protobufs.AgentRemoteConfig{
 					Config: &protobufs.AgentConfigMap{
-						ConfigMap: map[string]*protobufs.AgentConfigFile{
+						ConfigMap: map[string]*protobufs.AgentConfigObject{
 							"": {Body: cfg.Bytes()},
 						},
 					},
@@ -1509,7 +1509,7 @@ func TestSupervisorRestartsCollectorAfterBadConfig(t *testing.T) {
 			server.sendToSupervisor(&protobufs.ServerToAgent{
 				RemoteConfig: &protobufs.AgentRemoteConfig{
 					Config: &protobufs.AgentConfigMap{
-						ConfigMap: map[string]*protobufs.AgentConfigFile{
+						ConfigMap: map[string]*protobufs.AgentConfigObject{
 							"": {Body: cfg.Bytes()},
 						},
 					},
@@ -1556,42 +1556,6 @@ func TestSupervisorConfiguresCapabilities(t *testing.T) {
 
 		return caps == uint64(protobufs.AgentCapabilities_AgentCapabilities_ReportsStatus|protobufs.AgentCapabilities_AgentCapabilities_ReportsHeartbeat)
 	}, 5*time.Second, 250*time.Millisecond)
-}
-
-func TestSupervisorPackageCapabilitiesReturnError(t *testing.T) {
-	// Verifies that when accepts_packages is enabled,
-	// the supervisor fails to start and never connects to the server.
-	if runtime.GOOS == "windows" {
-		t.Skip("Zap does not close the log file and Windows disallows removing files that are still opened.")
-	}
-
-	connected := atomic.Bool{}
-	server := newUnstartedOpAMPServer(t, defaultConnectingHandler, types.ConnectionCallbacks{
-		OnConnected: func(ctx context.Context, conn types.Connection) {
-			connected.Store(true)
-		},
-	})
-	defer server.shutdown()
-	server.start()
-
-	storageDir := t.TempDir()
-	supervisorLogFilePath := filepath.Join(storageDir, "supervisor_log.log")
-	cfgFile := getSupervisorConfig(t, "packages_cap", map[string]string{
-		"url":         server.addr,
-		"storage_dir": storageDir,
-		"log_level":   "0",
-		"log_file":    supervisorLogFilePath,
-	})
-	cfg, err := config.Load(cfgFile.Name())
-	require.NoError(t, err)
-	logger, err := telemetry.NewLogger(cfg.Telemetry.Logs)
-	require.NoError(t, err)
-
-	s, err := supervisor.NewSupervisor(t.Context(), logger, cfg)
-	require.NoError(t, err)
-	err = s.Start(t.Context())
-	require.ErrorContains(t, err, "accepts_packages capability is not yet fully implemented")
-	require.False(t, connected.Load(), "Supervisor should not have connected to the server")
 }
 
 func TestSupervisorBootstrapsCollector(t *testing.T) {
@@ -1893,7 +1857,7 @@ func TestSupervisorReportsEffectiveConfig(t *testing.T) {
 	server.sendToSupervisor(&protobufs.ServerToAgent{
 		RemoteConfig: &protobufs.AgentRemoteConfig{
 			Config: &protobufs.AgentConfigMap{
-				ConfigMap: map[string]*protobufs.AgentConfigFile{
+				ConfigMap: map[string]*protobufs.AgentConfigObject{
 					"": {Body: cfg.Bytes()},
 				},
 			},
@@ -2066,7 +2030,7 @@ service:
 	server.sendToSupervisor(&protobufs.ServerToAgent{
 		RemoteConfig: &protobufs.AgentRemoteConfig{
 			Config: &protobufs.AgentConfigMap{
-				ConfigMap: map[string]*protobufs.AgentConfigFile{
+				ConfigMap: map[string]*protobufs.AgentConfigObject{
 					"": {Body: updatedConfig},
 				},
 			},
@@ -2330,7 +2294,7 @@ func TestSupervisorRestartCommand(t *testing.T) {
 			server.sendToSupervisor(&protobufs.ServerToAgent{
 				RemoteConfig: &protobufs.AgentRemoteConfig{
 					Config: &protobufs.AgentConfigMap{
-						ConfigMap: map[string]*protobufs.AgentConfigFile{
+						ConfigMap: map[string]*protobufs.AgentConfigObject{
 							"": {Body: cfg.Bytes()},
 						},
 					},
@@ -2506,7 +2470,7 @@ func TestSupervisorRestartsWithLastReceivedConfig(t *testing.T) {
 			initialServer.sendToSupervisor(&protobufs.ServerToAgent{
 				RemoteConfig: &protobufs.AgentRemoteConfig{
 					Config: &protobufs.AgentConfigMap{
-						ConfigMap: map[string]*protobufs.AgentConfigFile{
+						ConfigMap: map[string]*protobufs.AgentConfigObject{
 							"": {Body: cfg.Bytes()},
 						},
 					},
@@ -2801,7 +2765,7 @@ func TestSupervisorStopsAgentProcessWithEmptyConfigMap(t *testing.T) {
 	server.sendToSupervisor(&protobufs.ServerToAgent{
 		RemoteConfig: &protobufs.AgentRemoteConfig{
 			Config: &protobufs.AgentConfigMap{
-				ConfigMap: map[string]*protobufs.AgentConfigFile{
+				ConfigMap: map[string]*protobufs.AgentConfigObject{
 					"": {Body: cfg.Bytes()},
 				},
 			},
@@ -2835,7 +2799,7 @@ func TestSupervisorStopsAgentProcessWithEmptyConfigMap(t *testing.T) {
 	server.sendToSupervisor(&protobufs.ServerToAgent{
 		RemoteConfig: &protobufs.AgentRemoteConfig{
 			Config: &protobufs.AgentConfigMap{
-				ConfigMap: map[string]*protobufs.AgentConfigFile{},
+				ConfigMap: map[string]*protobufs.AgentConfigObject{},
 			},
 			ConfigHash: emptyHash[:],
 		},
@@ -2887,7 +2851,7 @@ func TestSupervisorLogging(t *testing.T) {
 	collectorCfg, hash := createHostMetricsCollectorConf(t)
 	remoteCfgProto := &protobufs.AgentRemoteConfig{
 		Config: &protobufs.AgentConfigMap{
-			ConfigMap: map[string]*protobufs.AgentConfigFile{
+			ConfigMap: map[string]*protobufs.AgentConfigObject{
 				"": {Body: collectorCfg.Bytes()},
 			},
 		},
@@ -3019,7 +2983,7 @@ func TestSupervisorRemoteConfigApplyStatus(t *testing.T) {
 			server.sendToSupervisor(&protobufs.ServerToAgent{
 				RemoteConfig: &protobufs.AgentRemoteConfig{
 					Config: &protobufs.AgentConfigMap{
-						ConfigMap: map[string]*protobufs.AgentConfigFile{
+						ConfigMap: map[string]*protobufs.AgentConfigObject{
 							"": {Body: cfg.Bytes()},
 						},
 					},
@@ -3078,7 +3042,7 @@ func TestSupervisorRemoteConfigApplyStatus(t *testing.T) {
 				server.sendToSupervisor(&protobufs.ServerToAgent{
 					RemoteConfig: &protobufs.AgentRemoteConfig{
 						Config: &protobufs.AgentConfigMap{
-							ConfigMap: map[string]*protobufs.AgentConfigFile{
+							ConfigMap: map[string]*protobufs.AgentConfigObject{
 								"": {Body: badCfg.Bytes()},
 							},
 						},
@@ -3103,7 +3067,7 @@ func TestSupervisorRemoteConfigApplyStatus(t *testing.T) {
 				server.sendToSupervisor(&protobufs.ServerToAgent{
 					RemoteConfig: &protobufs.AgentRemoteConfig{
 						Config: &protobufs.AgentConfigMap{
-							ConfigMap: map[string]*protobufs.AgentConfigFile{},
+							ConfigMap: map[string]*protobufs.AgentConfigObject{},
 						},
 						ConfigHash: emptyHash[:],
 					},
@@ -3169,7 +3133,7 @@ func TestSupervisorReportsCollectorLogTailOnRemoteConfigCrash(t *testing.T) {
 	server.sendToSupervisor(&protobufs.ServerToAgent{
 		RemoteConfig: &protobufs.AgentRemoteConfig{
 			Config: &protobufs.AgentConfigMap{
-				ConfigMap: map[string]*protobufs.AgentConfigFile{
+				ConfigMap: map[string]*protobufs.AgentConfigObject{
 					"": {Body: badCfg.Bytes()},
 				},
 			},
@@ -3228,7 +3192,7 @@ func TestSupervisorOpAmpServerPort(t *testing.T) {
 	server.sendToSupervisor(&protobufs.ServerToAgent{
 		RemoteConfig: &protobufs.AgentRemoteConfig{
 			Config: &protobufs.AgentConfigMap{
-				ConfigMap: map[string]*protobufs.AgentConfigFile{
+				ConfigMap: map[string]*protobufs.AgentConfigObject{
 					"": {Body: cfg.Bytes()},
 				},
 			},
@@ -3753,7 +3717,7 @@ func TestSupervisorValidatesConfigBeforeApplying(t *testing.T) {
 			server.sendToSupervisor(&protobufs.ServerToAgent{
 				RemoteConfig: &protobufs.AgentRemoteConfig{
 					Config: &protobufs.AgentConfigMap{
-						ConfigMap: map[string]*protobufs.AgentConfigFile{
+						ConfigMap: map[string]*protobufs.AgentConfigObject{
 							"": {Body: goodCfg.Bytes()},
 						},
 					},
@@ -3776,7 +3740,7 @@ func TestSupervisorValidatesConfigBeforeApplying(t *testing.T) {
 			server.sendToSupervisor(&protobufs.ServerToAgent{
 				RemoteConfig: &protobufs.AgentRemoteConfig{
 					Config: &protobufs.AgentConfigMap{
-						ConfigMap: map[string]*protobufs.AgentConfigFile{
+						ConfigMap: map[string]*protobufs.AgentConfigObject{
 							"": {Body: invalidCfg},
 						},
 					},
@@ -3862,7 +3826,7 @@ func TestSupervisorValidateConfigWithLocalConfig(t *testing.T) {
 			server.sendToSupervisor(&protobufs.ServerToAgent{
 				RemoteConfig: &protobufs.AgentRemoteConfig{
 					Config: &protobufs.AgentConfigMap{
-						ConfigMap: map[string]*protobufs.AgentConfigFile{
+						ConfigMap: map[string]*protobufs.AgentConfigObject{
 							"": {Body: invalidConfig},
 						},
 					},
@@ -4201,8 +4165,9 @@ func enableExtensionsFeatureGate(t *testing.T) {
 }
 
 // supervisorBinarySizeLimitBytes is the size budget for the supervisor binary,
-// in bytes. This fork includes S3 and objstore providers, which link cloud SDKs.
-const supervisorBinarySizeLimitBytes = 64 * 1024 * 1024
+// in bytes. This fork includes S3 and objstore providers, which link cloud SDKs,
+// and the Cosign package verifier, which links sigstore-go (~4 MiB).
+const supervisorBinarySizeLimitBytes = 72 * 1024 * 1024
 
 // TestSupervisorBinarySize guards against unintended growth of the supervisor
 // binary. It builds the supervisor with the same flags used for release
