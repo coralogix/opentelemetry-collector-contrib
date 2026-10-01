@@ -26,14 +26,14 @@ func TestNewVerifier(t *testing.T) {
 		},
 		{
 			name:        "unsupported verifier type",
-			verifier:    config.Verifier{Type: "cosign"},
+			verifier:    config.Verifier{Type: "gpg"},
 			expectedErr: "unsupported verifier type",
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			v, err := NewVerifier(tc.verifier)
+			v, err := NewVerifier(tc.verifier, t.TempDir())
 			if tc.expectedErr != "" {
 				require.ErrorContains(t, err, tc.expectedErr)
 				assert.Nil(t, v)

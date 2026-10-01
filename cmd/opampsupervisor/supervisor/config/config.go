@@ -155,8 +155,6 @@ func (c Capabilities) SupportedCapabilities() protobufs.AgentCapabilities {
 		supportedCapabilities |= protobufs.AgentCapabilities_AgentCapabilities_ReportsHeartbeat
 	}
 
-	// AcceptsPackages is not yet fully implemented. It is included here for completeness.
-	// See https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/47272
 	// AcceptsPackages enables both the AcceptsPackages and ReportsPackageStatuses
 	// OpAMP capabilities; accepting packages without reporting their statuses is not useful.
 	if c.AcceptsPackages {
@@ -506,7 +504,16 @@ func DefaultSupervisor() Supervisor {
 			ValidateConfig:              false,
 			Package: AgentPackage{
 				AgentBinary: defaultAgentBinary,
-				Verifier:    Verifier{Type: VerifierTypeNone},
+				Verifier: Verifier{
+					Type: VerifierTypeCosign,
+					Cosign: CosignSignatureVerifier{
+						CertGithubWorkflowRepository: defaultCosignRepository,
+						Identities: []AgentSignatureIdentity{{
+							Issuer:        defaultCosignIssuer,
+							SubjectRegExp: defaultCosignSubjectRegExp,
+						}},
+					},
+				},
 			},
 		},
 		Telemetry: Telemetry{

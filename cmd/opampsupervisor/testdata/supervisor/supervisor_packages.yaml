@@ -1,0 +1,20 @@
+server:
+  endpoint: ws://{{.url}}/v1/opamp
+
+capabilities:
+  reports_effective_config: true
+  reports_health: true
+  accepts_remote_config: true
+  accepts_packages: true
+
+storage:
+  directory: '{{.storage_dir}}'
+
+agent:
+  executable: '{{.executable}}'
+  bootstrap_timeout: 10s
+  config_apply_timeout: 10s
+  package:
+    # The package is a test-built wrapper script, so it is not signed.
+    verifier:
+      type: ""

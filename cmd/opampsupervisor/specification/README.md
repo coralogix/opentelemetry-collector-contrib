@@ -95,7 +95,6 @@ capabilities:
   # The Supervisor can accept Collector executable package updates.
   # Enables both the AcceptsPackages and ReportsPackageStatuses OpAMP
   # capabilities.
-  # NOTE: This capability is not yet fully implemented.
   accepts_packages: # false if unspecified
 
   # The Supervisor will report EffectiveConfig to the Server.
@@ -191,8 +190,7 @@ agent:
 
   # Optional configuration for how collector executable updates are identified
   # and verified. The archive format is not configured here; the supervisor
-  # detects it from the download URL and Content-Type header.
-  # NOTE: This functionality is not yet fully implemented.
+  # detects it from the path suffix of the download URL.
   package:
     # Name of the collector binary as it appears inside the archive the supervisor
     # downloads. Used to locate the binary in archives that bundle multiple files.
@@ -666,13 +664,6 @@ the next Collector start (at the minimum the version number to be
 included in AgentDescription is expected to change after the executable
 is updated).
 
-> **Note:** The collector executable update flow is not yet fully implemented.
-> The `accepts_packages` capability (which enables both the AcceptsPackages and
-> ReportsPackageStatuses OpAMP capabilities) is accepted
-> in configuration but is currently disabled at runtime. See
-> [#47272](https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/47272)
-> for implementation progress.
-
 More detail on the specific format and end-to-end flow can
 be found in the [Collector Executable Updates Flow](#collector-executable-updates-flow)
 section.
@@ -789,11 +780,6 @@ on opamp extension to report the health when it changes?*
 
 ## Collector Executable Updates Flow
 
-> **Note:** The functionality described in this section is not yet fully implemented.
-> It is included here for design review purposes. See
-> [#47272](https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/47272)
-> for progress.
-
 The Supervisor will download Collector package updates when offered to
 by the OpAMP Server, if the AcceptsPackages capability is enabled.
 
@@ -813,7 +799,7 @@ This configuration and the upgrade behavior is only used when the `accepts_packa
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `agent.package.agent_binary` | string | `"otelcol-contrib"` (Linux/macOS), `"otelcol-contrib.exe"` (Windows) | Name of the collector binary as it appears inside the archive the supervisor downloads. Used to locate the binary in archives that bundle multiple files. The archive format itself is detected from the download URL and Content-Type header, not configured. |
+| `agent.package.agent_binary` | string | `"otelcol-contrib"` (Linux/macOS), `"otelcol-contrib.exe"` (Windows) | Name of the collector binary as it appears inside the archive the supervisor downloads. Used to locate the binary in archives that bundle multiple files. The archive format itself is detected from the download URL (`.tar.gz` or `.tgz` for a gzipped tarball, anything else for a raw binary), not configured. |
 | `agent.package.verifier.type` | string | `"cosign"` | Specifies which verification type should be used. Specific verifier configuration options are defined below. |
 
 The Supervisor configuration allows for other verification mechanisms to be added in the future. The list of
@@ -833,21 +819,22 @@ It can be used with any release workflow that uses [Cosign](https://github.com/s
 2. Cosign gets a signed certificate from [Fulcio](https://github.com/sigstore/fulcio).
 3. Cosign writes the artifact digest, computed signature, and certificate to the public
     [Rekor](https://github.com/sigstore/rekor) instance.
-4. The release workflow adds the release artifacts, Cosign signature,
-    and certificate files to the release.
+4. The release workflow adds the release artifacts and their Cosign
+    bundles (`.sigstore.json` files) to the release.
 5. An OpAMP server is made aware of the release through some mechanism
     (e.g. manually through user intervention, through polling the GitHub API,
     etc)
 6. The OpAMP server sends a PackagesAvailable message with the new agent
     release specified. See the [Expected PackagesAvailable Format](#expected-packagesavailable-format)
     section for more information.
-7. The supervisor, on startup, has retrieved the Sigstore root certificates.
+7. The supervisor, on startup, has retrieved the Sigstore trusted root (Fulcio, Rekor,
+    certificate transparency log, and timestamp authority keys) from the Sigstore TUF repository.
 8. The supervisor downloads the agent binary from the release using
     the URL that the OpAMP server gave it for downloading. Verifies the content hash matches
     the server provided content hash.
-9. The supervisor verifies the signature, certificate, and artifact digest via the root certificates downloaded in step 7.
-    In addition, the supervisor checks against the Rekor transparency log to
-    verify the certificate hasn't been tampered with.
+9. The supervisor verifies the signature, certificate, and artifact digest in the bundle using the trusted root
+    downloaded in step 7. The Rekor transparency log entry and signed timestamp included in the bundle are
+    verified offline against the same trusted root; no Sigstore service is contacted at update time.
 10. The supervisor replaces and restarts the agent, and the new agent is now running.
     The new agent will give its new AgentDescription and will report its new version.
 
@@ -872,12 +859,12 @@ package.
 
 - This package MUST have an empty name.
 - The type of the package MUST be top level.
-- The version field SHOULD be the version of the agent. (e.g. `v0.135.0`)
+- The version field SHOULD be the version of the agent. (e.g. `v0.158.0`)
 - The download URL MUST point to a supported archive format, containing a file matching
     the binary name the supervisor is configured to expect. This file will be used as the agent binary.
 - The content hash MUST be the sha256 sum of the artifact.
-- The signature field MUST be a Cosign signature, formatted in the way
-    described in the [Signature Format](#signature-format) session.
+- The signature field MUST be a Sigstore bundle, as described in the
+    [Signature Format](#signature-format) section.
 
 Example:
 
@@ -886,12 +873,13 @@ Example:
     Packages: map[string]*protobufs.PackageAvailable{
         "": {
             Type:    protobufs.PackageType_PackageType_TopLevel,
-            Version: "v0.135.0",
+            Version: "v0.158.0",
             Hash: packageHash
             File: &protobufs.DownloadableFile{
-                DownloadUrl: "https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v0.135.0/otelcol-contrib_0.135.0_linux_amd64.tar.gz",
-                ContentHash: "43132748eb0effb56b9d508ca789149684bf7ab6ade5d65cd0b22c4d265a30c0",
-                Signature:   "b64_certificate b64_signature",
+                DownloadUrl: "https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v0.158.0/otelcol-contrib_0.158.0_linux_amd64.tar.gz",
+                ContentHash: "7623348c295ec7b00d86c30040a30730f7e3537e813b34c880c1d5abb9bbe8d5",
+                // contents of otelcol-contrib_0.158.0_linux_amd64.tar.gz.sigstore.json
+                Signature:   sigstoreBundle,
             },
         },
     },
@@ -903,11 +891,10 @@ Example:
 
 In order for an agent package to be accepted by the supervisor, the
 package MUST be signed. By default, the supervisor expects the agent tarball to be signed
-using [Cosign](https://github.com/sigstore/cosign), using the keyless signing method to generate separate certificate
-and signature files.
+using [Cosign](https://github.com/sigstore/cosign) keyless signing, which produces a
+[Sigstore bundle](https://docs.sigstore.dev/about/bundle/) per artifact.
 
-Both the certificate and Cosign signature will be used to create the
-file's signature in the PackagesAvailable message.
+The bundle is used as the file's signature in the PackagesAvailable message.
 
 #### Signing Flow
 
@@ -926,12 +913,13 @@ The certificate signed by Fulcio is bound to the identity token and the public k
 to verify the identity of the signer and verify the artifacts have not been tampered with.
 
 Cosign then writes the Fulcio issued certificate, artifact signature, and artifact digest to
-[Rekor](https://github.com/sigstore/rekor), a public transparency log. Afterwards, the signature and certificate are
-included in the release as `.sig` and `.pem` files for the given artifact.
+[Rekor](https://github.com/sigstore/rekor), a public transparency log, and obtains a signed timestamp
+from the Sigstore timestamp authority. Afterwards, the certificate, signature, Rekor log entry, and
+timestamp are packaged into a Sigstore bundle and included in the release as a `.sigstore.json` file
+for the given artifact.
 
-As a result, both the certificate and signature together can be used to verify
-the identity of the signer, verify that the artifact that was downloaded
-is the same artifact that was signed, and verify the certificate/signature
+As a result, the bundle alone can be used to verify the identity of the signer, verify that the
+artifact that was downloaded is the same artifact that was signed, and verify the certificate/signature
 was not tampered with via its inclusion in Rekor.
 
 For more information on keyless signing and Cosign, see the
@@ -939,18 +927,18 @@ For more information on keyless signing and Cosign, see the
 
 #### Signature Format
 
-In the PackagesAvailable message, the signature MUST be created by
-joining the base64 encoded certificate and signature files generated
-by Cosign. These fields should be separated with a single space in
-the string like in the example below. Note that the files generated
-by Cosign are already base64 encoded and do not need to be encoded further.
-These will be `.sig` and `.pem` files with names matching the release artifact.
+In the PackagesAvailable message, the signature MUST be the contents of the
+Sigstore bundle generated by Cosign for the artifact, unmodified. This is the
+`.sigstore.json` file with a name matching the release artifact (e.g.
+`otelcol-contrib_0.158.0_linux_amd64.tar.gz.sigstore.json`). The bundle is a
+JSON document with media type `application/vnd.dev.sigstore.bundle.v0.3+json`
+containing the signing certificate, the artifact signature, the Rekor
+transparency log entry, and a signed timestamp.
 
-The signature format should look like this:
-
-```sh
-${b64_certificate} ${b64_signature}
-```
+OpenTelemetry Collector releases prior to `v0.158.0` published separate `.sig`
+and `.pem` files instead of a bundle. That format is not supported. To deploy an
+older release, the OpAMP server can use those files to construct an equivalent
+Cosign v3 Sigstore bundle and send it as the signature.
 
 #### Signature Verification
 
@@ -960,8 +948,9 @@ The signature on the artifact is verified using the public key bound to the Fulc
 the package has not been tampered with. Additionally the identity on the certificate is verified and checked
 against an expected identity. The certificate is also verified to be an authentic certificate generated by Fulcio.
 
-The [Rekor](https://github.com/sigstore/rekor) transparency log is also checked to ensure the presence of the given
-artifact signature, artifact digest, and certificate. This ensures the package matches the package that was generated at release.
+The [Rekor](https://github.com/sigstore/rekor) transparency log entry and signed timestamp carried in the bundle are
+also verified to ensure the given artifact signature, artifact digest, and certificate were logged while the
+certificate was valid. This ensures the package matches the package that was generated at release.
 
 This process of signature verification requires several things.
 
@@ -976,22 +965,54 @@ A list of configurable options include:
   - This field may be explicitly set empty to skip verifying the repository field
         in the certificate
 
-Additionally various public keys and root certificates are needed. These are retrieved by the supervisor at startup.
+Additionally the Sigstore trusted root is needed. It is retrieved by the supervisor at startup from the
+public Sigstore TUF repository, "<https://tuf-repo-cdn.sigstore.dev>", and contains:
 
-- A set of [Fulcio](https://github.com/sigstore/fulcio) root certificates.
-  - These certificates are retrieved from "<https://tuf-repo-cdn.sigstore.dev>"
-        on startup.
-- A set of trusted Rekor public keys.
-  - These public keys are retrieved from "<https://tuf-repo-cdn.sigstore.dev>"
-        on startup.
-- A set of trusted certificate transparency (CT) log public keys
-  - These certificates are retrieved from "<https://tuf-repo-cdn.sigstore.dev>"
-        on startup.
-- A URL of a running [Rekor](https://github.com/sigstore/rekor) instance.
-  - This is hardcoded to be the public Rekor instance, "<https://rekor.sigstore.dev>".
+- The [Fulcio](https://github.com/sigstore/fulcio) root and intermediate certificates.
+- The trusted [Rekor](https://github.com/sigstore/rekor) public keys.
+- The trusted certificate transparency (CT) log public keys.
+- The trusted timestamp authority certificates.
+
+Verification itself is performed offline using the bundle and the trusted root; no Sigstore service
+is contacted at update time.
 
 For a more in depth explanation of how Cosign/Sigstore works, see
 [Sigstore's docs](https://docs.sigstore.dev/about/overview/#how-sigstore-works).
+
+The Sigstore trusted root is fetched when a package is verified, not when the Supervisor
+starts, so the Supervisor can start without network access. The TUF metadata is cached in
+the `sigstore` directory under `storage.directory`.
+
+### Installation and Rollback
+
+After the package is verified, the Supervisor installs it:
+
+1. The agent binary is extracted next to `agent.executable`, as `<executable>.new`.
+2. The Collector is stopped. The current executable is renamed to `<executable>.old`, and
+   `<executable>.new` is renamed to the executable path.
+3. The new binary is bootstrapped to obtain its AgentDescription and available components.
+   The Collector config is composed again for the new AgentDescription.
+4. The Collector is started. The upgrade succeeds when the Collector reports being healthy
+   within `agent.config_apply_timeout`. `<executable>.old` is then deleted and the package
+   is reported as `INSTALLED`.
+
+If the new binary cannot be bootstrapped, exits, or does not report being healthy in time,
+the Supervisor stops it, renames `<executable>.old` back to the executable path, and
+bootstraps and starts the previous binary again. The package is reported as
+`INSTALL_FAILED`. The content hash of a package that failed this way is saved, and the
+package is not installed again if the server offers it again. To allow a retry, remove
+the hash from `failed_content_hashes` in `package_state.yaml` in `storage.directory`.
+
+If the Supervisor stops during an upgrade, `<executable>.old` still exists when it starts
+again. The Supervisor then restores it before it runs the Collector.
+
+A restart command received during an upgrade is rejected. Feature gates are detected once
+when the Supervisor starts, and they are not detected again for an upgraded binary.
+
+The package state (the installed package's hash, version and content hash, and the hash
+of the installed executable) is saved in `package_state.yaml` in `storage.directory`.
+If the executable is replaced outside of the Supervisor, the saved package state is
+discarded on the next start.
 
 ## Future Work
 
