@@ -13,7 +13,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
+	"strings"
 )
 
 // maxAgentBytes is the maximum size of an agent binary the supervisor will write
@@ -31,6 +33,19 @@ const (
 	// the collector binary.
 	FormatTarGzip Format = "tar.gz"
 )
+
+// FormatFromURL returns the archive format of a package from the path suffix of
+// the URL it was downloaded from. Unknown suffixes are treated as a raw binary.
+func FormatFromURL(downloadURL string) Format {
+	path := downloadURL
+	if u, err := url.Parse(downloadURL); err == nil {
+		path = u.Path
+	}
+	if strings.HasSuffix(path, ".tar.gz") || strings.HasSuffix(path, ".tgz") {
+		return FormatTarGzip
+	}
+	return FormatNone
+}
 
 // Extractor extracts the agent binary from a downloaded package.
 type Extractor interface {

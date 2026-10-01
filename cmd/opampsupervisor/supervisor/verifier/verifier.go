@@ -20,10 +20,13 @@ type Verifier interface {
 }
 
 // NewVerifier returns the Verifier for the given verifier configuration.
-func NewVerifier(cfg config.Verifier) (Verifier, error) {
+// cacheDir is where verifiers may cache trust material between calls.
+func NewVerifier(cfg config.Verifier, cacheDir string) (Verifier, error) {
 	switch cfg.Type {
 	case config.VerifierTypeNone:
 		return &noneVerifier{}, nil
+	case config.VerifierTypeCosign:
+		return newCosignVerifier(cfg.Cosign, cacheDir)
 	default:
 		return nil, fmt.Errorf("unsupported verifier type: %q", cfg.Type)
 	}

@@ -3435,7 +3435,7 @@ service:
 
 	require.NoError(t, s.createTemplates())
 
-	noopConfigBytes, err := s.composeNoopConfig()
+	noopConfigBytes, err := s.composeNoopConfig(s.opampServerPort)
 	noopConfig := strings.ReplaceAll(string(noopConfigBytes), "\r\n", "\n")
 
 	require.NoError(t, err)
@@ -3490,7 +3490,7 @@ service:
 
 	require.NoError(t, s.createTemplates())
 
-	noopConfigBytes, err := s.composeNoopConfig()
+	noopConfigBytes, err := s.composeNoopConfig(s.opampServerPort)
 	noopConfig := strings.ReplaceAll(string(noopConfigBytes), "\r\n", "\n")
 
 	require.NoError(t, err)
@@ -3549,7 +3549,7 @@ service:
 
 	require.NoError(t, s.createTemplates())
 
-	noopConfigBytes, err := s.composeNoopConfig()
+	noopConfigBytes, err := s.composeNoopConfig(s.opampServerPort)
 	noopConfig := strings.ReplaceAll(string(noopConfigBytes), "\r\n", "\n")
 
 	require.NoError(t, err)
@@ -3667,7 +3667,7 @@ func TestSupervisor_composeNoopConfigDisablesInternalMetrics(t *testing.T) {
 
 	require.NoError(t, s.createTemplates())
 
-	noopConfigBytes, err := s.composeNoopConfig()
+	noopConfigBytes, err := s.composeNoopConfig(s.opampServerPort)
 	require.NoError(t, err)
 
 	conf, err := config.NewConfFromYAML(noopConfigBytes)

@@ -230,6 +230,14 @@ type Supervisor struct {
 	// passthroughLogBuffer keeps the latest Collector log lines when passthrough logging is enabled.
 	passthroughLogBuffer *logRingBuffer
 	passthroughLogMu     sync.Mutex
+
+	// packageManager handles agent packages offered by the server. nil unless accepts_packages is set.
+	packageManager *packageManager
+	// agentUpgrade carries agent binary installs from the package manager to
+	// runAgentProcess, which owns the agent process and executable.
+	agentUpgrade chan agentUpgradeRequest
+	// agentUpgrading is true while runAgentProcess installs a new agent binary.
+	agentUpgrading atomic.Bool
 }
 
 func NewSupervisor(ctx context.Context, logger *zap.Logger, cfg config.Supervisor) (*Supervisor, error) {
@@ -250,6 +258,7 @@ func NewSupervisor(ctx context.Context, logger *zap.Logger, cfg config.Superviso
 		metrics:                        &supervisorTelemetry.Metrics{},
 		heartbeatIntervalSeconds:       30,
 		initialOpampConnSuccess:        atomic.Bool{},
+		agentUpgrade:                   make(chan agentUpgradeRequest),
 	}
 
 	s.runCtx, s.runCtxCancel = context.WithCancel(ctx)
@@ -389,11 +398,9 @@ func (s *Supervisor) Start(ctx context.Context) error {
 	}
 
 	if s.config.Capabilities.AcceptsPackages {
-		s.telemetrySettings.Logger.Error(
-			"accepts_packages capability is not yet fully implemented. " +
-				"See https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/47272 for progress.",
-		)
-		return errors.New("accepts_packages capability is not yet fully implemented")
+		if err = s.recoverInterruptedUpgrade(); err != nil {
+			return fmt.Errorf("could not recover interrupted agent upgrade: %w", err)
+		}
 	}
 
 	if s.config.Capabilities.ReportsRemoteConfig { //nolint:staticcheck // SA1019: deprecated field is read only to warn about its use
@@ -409,8 +416,25 @@ func (s *Supervisor) Start(ctx context.Context) error {
 		return fmt.Errorf("could not get feature gates from the Collector: %w", err)
 	}
 
-	if err = s.getBootstrapInfo(); err != nil {
+	if s.opampServerPort, err = s.getSupervisorOpAMPServerPort(); err != nil {
+		return fmt.Errorf("could not get supervisor opamp server port: %w", err)
+	}
+
+	if err = s.getBootstrapInfo(s.opampServerPort, s.agentConfigFilePath()); err != nil {
 		return fmt.Errorf("could not get bootstrap info from the Collector: %w", err)
+	}
+
+	if s.config.Capabilities.AcceptsPackages {
+		s.packageManager, err = newPackageManager(
+			s.telemetrySettings.Logger,
+			s.config.Storage.Directory,
+			s.config.Agent,
+			agentVersion(s.agentDescription.Load().(*protobufs.AgentDescription)),
+			s.installAgentBinary,
+		)
+		if err != nil {
+			return fmt.Errorf("could not create package manager: %w", err)
+		}
 	}
 
 	s.telemetrySettings.Logger.Info("Supervisor starting",
@@ -514,24 +538,19 @@ func (s *Supervisor) createTemplates() error {
 // starting a Collector with a specific config that only starts
 // an OpAMP extension, obtains the agent description, then
 // shuts down the Collector. This only needs to happen
-// once per Collector binary.
-func (s *Supervisor) getBootstrapInfo() (err error) {
+// once per Collector binary. The one-shot OpAMP server listens on port and the
+// bootstrap config is written to configPath.
+func (s *Supervisor) getBootstrapInfo(port int, configPath string) (err error) {
 	_, span := s.getTracer().Start(s.runCtx, "GetBootstrapInfo")
 	defer span.End()
 
-	s.opampServerPort, err = s.getSupervisorOpAMPServerPort()
-	if err != nil {
-		span.SetStatus(codes.Error, fmt.Sprintf("Could not get supervisor opamp service port: %v", err))
-		return err
-	}
-
-	bootstrapConfig, err := s.composeNoopConfig()
+	bootstrapConfig, err := s.composeNoopConfig(port)
 	if err != nil {
 		span.SetStatus(codes.Error, fmt.Sprintf("Could not compose noop config config: %v", err))
 		return err
 	}
 
-	err = os.WriteFile(s.agentConfigFilePath(), bootstrapConfig, 0o600)
+	err = os.WriteFile(configPath, bootstrapConfig, 0o600)
 	if err != nil {
 		span.SetStatus(codes.Error, fmt.Sprintf("Failed to write agent config: %v", err))
 		return fmt.Errorf("failed to write agent config: %w", err)
@@ -546,7 +565,7 @@ func (s *Supervisor) getBootstrapInfo() (err error) {
 	// Start a one-shot server to get the Collector's agent description
 	// and available components using the Collector's OpAMP extension.
 	err = srv.Start(flattenedSettings{
-		endpoint: fmt.Sprintf("localhost:%d", s.opampServerPort),
+		endpoint: fmt.Sprintf("localhost:%d", port),
 		onConnecting: func(*http.Request) (bool, int) {
 			connected.Store(true)
 			return true, http.StatusOK
@@ -615,7 +634,7 @@ func (s *Supervisor) getBootstrapInfo() (err error) {
 	}()
 
 	flags := []string{
-		"--config", s.agentConfigFilePath(),
+		"--config", configPath,
 	}
 	featuregateFlag := s.getFeatureGateFlag()
 	if len(featuregateFlag) > 0 {
@@ -750,6 +769,11 @@ func (s *Supervisor) startOpAMPClient() error {
 				return s.createEffectiveConfigMsg(), nil
 			},
 		},
+	}
+
+	// Assign only when set: a nil *packageManager would be a non-nil interface.
+	if s.packageManager != nil {
+		settings.PackagesStateProvider = s.packageManager
 	}
 
 	// Find and use auth extension if configured with non-empty reference
@@ -1263,7 +1287,8 @@ func (s *Supervisor) createRemoteConfigComposers(incomingConfig *protobufs.Agent
 	return remoteConfigComposers
 }
 
-func (s *Supervisor) composeNoopConfig() ([]byte, error) {
+// composeNoopConfig composes the bootstrap config. Its OpAMP extension connects to port.
+func (s *Supervisor) composeNoopConfig(port int) ([]byte, error) {
 	cfg, err := s.composeNoopPipeline()
 	if err != nil {
 		return nil, err
@@ -1272,7 +1297,7 @@ func (s *Supervisor) composeNoopConfig() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := config.MergeConfFromYAML(conf, s.composeOpAMPExtensionConfig()); err != nil {
+	if err := config.MergeConfFromYAML(conf, s.composeOpAMPExtensionConfigForPort(port)); err != nil {
 		return nil, err
 	}
 	// The bootstrap Collector is stopped as soon as it has reported its
@@ -1369,6 +1394,11 @@ func remoteConfigDeclaresResourceAttributes(body []byte) bool {
 }
 
 func (s *Supervisor) composeOpAMPExtensionConfig() []byte {
+	return s.composeOpAMPExtensionConfigForPort(s.opampServerPort)
+}
+
+// composeOpAMPExtensionConfigForPort composes the OpAMP extension config connecting to port.
+func (s *Supervisor) composeOpAMPExtensionConfigForPort(port int) []byte {
 	orphanPollInterval := 5 * time.Second
 	if s.config.Agent.OrphanDetectionInterval > 0 {
 		orphanPollInterval = s.config.Agent.OrphanDetectionInterval
@@ -1377,7 +1407,7 @@ func (s *Supervisor) composeOpAMPExtensionConfig() []byte {
 	var cfg bytes.Buffer
 	tplVars := map[string]any{
 		"InstanceUid":                s.persistentState.InstanceID.String(),
-		"SupervisorPort":             s.opampServerPort,
+		"SupervisorPort":             port,
 		"PID":                        s.pidProvider.PID(),
 		"PPIDPollInterval":           orphanPollInterval,
 		"ReportsAvailableComponents": s.config.Capabilities.ReportsAvailableComponents,
@@ -1946,6 +1976,9 @@ func (s *Supervisor) loadAndWriteFallbackConfig() error {
 }
 
 func (s *Supervisor) handleRestartCommand() error {
+	if s.agentUpgrading.Load() {
+		return errors.New("cannot restart the agent while its binary is being upgraded")
+	}
 	s.agentRestarting.Store(true)
 	defer s.agentRestarting.Store(false)
 	s.telemetrySettings.Logger.Debug("Received restart command")
@@ -2141,6 +2174,9 @@ func (s *Supervisor) runAgentProcess() {
 				continue
 			}
 			s.reportActiveConfigStatus(protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED, "")
+
+		case req := <-s.agentUpgrade:
+			req.result <- s.upgradeAgent(req.stagedPath)
 
 		case <-s.doneChan:
 			err := s.commander.Stop(s.runCtx)
@@ -2562,6 +2598,13 @@ func (s *Supervisor) onMessage(ctx context.Context, msg *types.MessageData) {
 
 	if msg.RemoteConfig != nil {
 		configChanged = s.processRemoteConfigMessage(ctx, msg.RemoteConfig) || configChanged
+	}
+
+	if msg.PackageSyncer != nil {
+		// Sync runs in the background and outlives this callback, so it gets runCtx.
+		if err := msg.PackageSyncer.Sync(s.runCtx); err != nil {
+			s.telemetrySettings.Logger.Error("Could not sync offered packages", zap.Error(err))
+		}
 	}
 
 	if msg.OwnMetricsConnSettings != nil || msg.OwnTracesConnSettings != nil || msg.OwnLogsConnSettings != nil {
