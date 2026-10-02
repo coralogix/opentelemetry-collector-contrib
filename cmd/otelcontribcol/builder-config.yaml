@@ -278,7 +278,7 @@ connectors:
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/connector/signaltometricsconnector v0.162.0
 
 providers:
-  - gomod: github.com/coralogix/opentelemetry-collector-contrib/confmap/provider/objstoreprovider v0.161.0
+  - gomod: github.com/coralogix/opentelemetry-collector-contrib/confmap/provider/objstoreprovider v0.162.0
   - gomod: go.opentelemetry.io/collector/confmap/provider/envprovider v1.68.0
   - gomod: go.opentelemetry.io/collector/confmap/provider/fileprovider v1.68.0
   - gomod: go.opentelemetry.io/collector/confmap/provider/httpprovider v1.68.0
