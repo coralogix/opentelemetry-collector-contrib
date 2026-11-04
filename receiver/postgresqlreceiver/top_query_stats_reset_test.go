@@ -65,7 +65,8 @@ func scrapeTargetCalls(t *testing.T, scraper *postgreSQLScraper, mock sqlmock.Sq
 
 func expectStatStatementsInfo(mock sqlmock.Sqlmock, dealloc int64, statsReset time.Time) {
 	mock.ExpectQuery(statStatementsInfoPattern).WillReturnRows(
-		sqlmock.NewRows([]string{"dealloc", "stats_reset"}).AddRow(dealloc, statsReset))
+		sqlmock.NewRows([]string{"dealloc", "stats_reset"}).AddRow(dealloc, statsReset),
+	)
 }
 
 // TestTopQueryStatsResetReportsCountersThatGrewPastStaleCache covers a reset

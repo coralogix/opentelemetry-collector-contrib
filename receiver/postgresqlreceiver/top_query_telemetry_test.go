@@ -4,7 +4,6 @@
 package postgresqlreceiver
 
 import (
-	"context"
 	"database/sql/driver"
 	"testing"
 	"time"
@@ -50,7 +49,7 @@ func topQueryRow(queryID, userid, value string) []driver.Value {
 // logs its seed/eviction counts at debug level.
 func TestTopQueryCacheTelemetryCountsSeedsAndEvictions(t *testing.T) {
 	tel := componenttest.NewTelemetry()
-	t.Cleanup(func() { require.NoError(t, tel.Shutdown(context.Background())) })
+	defer func() { require.NoError(t, tel.Shutdown(t.Context())) }()
 
 	core, observed := observer.New(zapcore.DebugLevel)
 	settings := receivertest.NewNopSettings(metadata.Type)

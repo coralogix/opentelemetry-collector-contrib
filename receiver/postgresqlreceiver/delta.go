@@ -3,6 +3,8 @@
 
 package postgresqlreceiver // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/postgresqlreceiver"
 
+import "maps"
+
 // cumulativeDelta converts a cumulative pg_stat_statements counter into a per-interval delta.
 // It returns the delta to report and the value to store in the cache. The cache must always be
 // updated with the returned value.
@@ -51,9 +53,7 @@ const (
 func statementDelta(prev statementCounters, seen, statsReset bool, current statementCounters) (statementCounters, deltaOutcome) {
 	deltas := make(statementCounters, len(current))
 	if statsReset {
-		for column, value := range current {
-			deltas[column] = value
-		}
+		maps.Copy(deltas, current)
 		return deltas, deltaReset
 	}
 	complete := seen
@@ -71,9 +71,7 @@ func statementDelta(prev statementCounters, seen, statsReset bool, current state
 	}
 	for column, value := range current {
 		if value < prev[column] {
-			for c, v := range current {
-				deltas[c] = v
-			}
+			maps.Copy(deltas, current)
 			return deltas, deltaReset
 		}
 	}
