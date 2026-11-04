@@ -1,0 +1,21 @@
+receiver/postgresqlreceiver/delta.go
+  s_f831f252c737d7::t_e23cf8c65f86ba 1-20
+receiver/postgresqlreceiver/delta_test.go
+  s_f831f252c737d7::t_9c06e623609d5f 1-45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b0eef06aad78e7ff8027e4ebf6b47353c55978f2",
+  "prompts": {},
+  "sessions": {
+    "s_f831f252c737d7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1d17d887-0e27-40f9-aede-50f0536246af",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "oded-dd <oded@coralogix.com>"
+    }
+  }
+}
