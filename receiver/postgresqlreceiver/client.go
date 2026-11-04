@@ -80,6 +80,7 @@ type client interface {
 	getVersion(ctx context.Context) (string, error)
 	getQuerySamples(ctx context.Context, limit int64, newestQueryTimestamp float64, excludedDatabases []string, logger *zap.Logger) ([]map[string]any, float64, error)
 	getTopQuery(ctx context.Context, limit int64, excludedDatabases []string, logger *zap.Logger) ([]map[string]any, error)
+	getStatStatementsInfo(ctx context.Context) (statStatementsInfo, error)
 	explainQuery(ctx context.Context, query, queryID string, logger *zap.Logger) (string, error)
 }
 
@@ -1669,6 +1670,32 @@ func convertToInt(column, value string, logger *zap.Logger) (any, error) {
 var topQueryTemplate string
 
 var topQueryTmpl = template.Must(template.New("topQuery").Option("missingkey=error").Parse(topQueryTemplate))
+
+// statStatementsInfo is the single row of pg_stat_statements_info.
+type statStatementsInfo struct {
+	// dealloc is the number of times pg_stat_statements entries were deallocated
+	// because more distinct statements than pg_stat_statements.max were observed.
+	dealloc int64
+	// statsReset is when all pg_stat_statements statistics were last reset.
+	statsReset sql.NullTime
+}
+
+const statStatementsInfoQuery = "/* otel-collector-ignore */ SELECT dealloc, stats_reset FROM pg_stat_statements_info;"
+
+// getStatStatementsInfo reads pg_stat_statements_info (PostgreSQL 14+, pg_stat_statements 1.9+).
+func (c *postgreSQLClient) getStatStatementsInfo(ctx context.Context) (statStatementsInfo, error) {
+	var info statStatementsInfo
+	if err := c.client.QueryRowContext(ctx, statStatementsInfoQuery).Scan(&info.dealloc, &info.statsReset); err != nil {
+		return statStatementsInfo{}, err
+	}
+	return info, nil
+}
+
+// isUndefinedTable reports whether err is PostgreSQL's undefined_table (42P01).
+func isUndefinedTable(err error) bool {
+	var pqErr *pq.Error
+	return errors.As(err, &pqErr) && pqErr.Code == "42P01"
+}
 
 // getTopQuery implements client.
 func (c *postgreSQLClient) getTopQuery(ctx context.Context, limit int64, excludedDatabases []string, logger *zap.Logger) ([]map[string]any, error) {

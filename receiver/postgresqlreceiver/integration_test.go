@@ -1200,13 +1200,20 @@ WHERE c.relname IN ('big_index_table', 'toasted_table') AND n.nspname = 'public'
 // real pg_stat_statements: a cold cache (first scrape, collector restart) must
 // seed rather than emit lifetime totals, and pg_stat_statements_reset() must be
 // reported as a reset rather than a 0 blackout until the counter climbs past
-// the stale cached value.
+// the stale cached value. On PostgreSQL 14+ pg_stat_statements_info.stats_reset
+// also catches a reset after which the counter already grew past the stale
+// value; before 14 only the decreasing-counter heuristic is available.
 func TestIntegrationTopQueryReset(t *testing.T) {
+	t.Run("pre14", func(t *testing.T) { testTopQueryReset(t, pre17TestVersion, false) })
+	t.Run("post14", func(t *testing.T) { testTopQueryReset(t, post17TestVersion, true) })
+}
+
+func testTopQueryReset(t *testing.T, pgVersion string, hasStatStatementsInfo bool) {
 	ci, err := testcontainers.GenericContainer(
 		t.Context(),
 		testcontainers.GenericContainerRequest{
 			ContainerRequest: testcontainers.ContainerRequest{
-				Image: fmt.Sprintf("postgres:%s", post17TestVersion),
+				Image: fmt.Sprintf("postgres:%s", pgVersion),
 				Env: map[string]string{
 					"POSTGRES_USER":     "root",
 					"POSTGRES_PASSWORD": "otel",
@@ -1293,14 +1300,33 @@ func TestIntegrationTopQueryReset(t *testing.T) {
 		return calls
 	}
 
+	resetStatements := func() {
+		t.Helper()
+		_, resetErr := workload.ExecContext(t.Context(), "SELECT pg_stat_statements_reset()")
+		require.NoError(t, resetErr)
+	}
+
 	scraper := newScraper()
 	runWorkload(1000)
 	assert.Empty(t, targetCalls(scraper), "first scrape must seed, not emit the lifetime total")
 	runWorkload(10)
 	assert.Equal(t, []int64{10}, targetCalls(scraper))
 
-	_, err = workload.ExecContext(t.Context(), "SELECT pg_stat_statements_reset()")
-	require.NoError(t, err)
+	// Reset, then the counter grows past the stale cached value (1010) within one interval.
+	resetStatements()
+	runWorkload(1020)
+	if hasStatStatementsInfo {
+		assert.Equal(t, []int64{1020}, targetCalls(scraper),
+			"a changed pg_stat_statements_info.stats_reset must report the full post-reset count")
+	} else {
+		// Known limitation without pg_stat_statements_info: only current - stale is visible.
+		assert.Equal(t, []int64{10}, targetCalls(scraper))
+	}
+	runWorkload(3)
+	assert.Equal(t, []int64{3}, targetCalls(scraper))
+
+	// Reset, then the counter stays below the stale cached value (1023).
+	resetStatements()
 	runWorkload(5)
 	assert.Equal(t, []int64{5}, targetCalls(scraper), "after pg_stat_statements_reset() the new counter must be reported, not 0")
 	runWorkload(3)
@@ -1310,9 +1336,7 @@ func TestIntegrationTopQueryReset(t *testing.T) {
 	// the statement's lifetime total is now well above 1000.
 	runWorkload(1000)
 	restarted := newScraper()
-	for _, calls := range targetCalls(restarted) {
-		assert.Less(t, calls, int64(1000), "a restarted collector must not emit the lifetime total")
-	}
+	assert.Empty(t, targetCalls(restarted), "a restarted collector must seed, not emit the lifetime total")
 	runWorkload(7)
 	assert.Equal(t, []int64{7}, targetCalls(restarted))
 }

@@ -59,7 +59,13 @@ type postgreSQLScraper struct {
 	excludedDatabases []string
 	excludes          map[string]struct{}
 	cache             *topQueryCache
-	telemetry         *metadata.TelemetryBuilder
+	// statStatementsInfo tracks whether pg_stat_statements_info (PostgreSQL 14+,
+	// pg_stat_statements 1.9+) can be read; lastStatsReset/lastDealloc hold its
+	// values from the previous top_query scrape.
+	statStatementsInfo statStatementsInfoState
+	lastStatsReset     time.Time
+	lastDealloc        int64
+	telemetry          *metadata.TelemetryBuilder
 	// if enabled, uses a separated attribute for the schema
 	separateSchemaAttr     bool
 	useOTelSemconv         bool
@@ -70,6 +76,18 @@ type postgreSQLScraper struct {
 	lastExecutionTimestamp time.Time
 	dbVersion              string
 }
+
+type statStatementsInfoState int
+
+const (
+	// statStatementsInfoUnknown: no successful read yet (or the last read failed transiently).
+	statStatementsInfoUnknown statStatementsInfoState = iota
+	// statStatementsInfoKnown: lastStatsReset/lastDealloc hold the previous scrape's values.
+	statStatementsInfoKnown
+	// statStatementsInfoUnsupported: the view does not exist (PostgreSQL < 14 or
+	// pg_stat_statements < 1.9); the monotonic heuristic alone detects resets.
+	statStatementsInfoUnsupported
+)
 
 type errsMux struct {
 	sync.RWMutex
@@ -452,6 +470,11 @@ func (p *postgreSQLScraper) collectTopQuery(ctx context.Context, clientFactory p
 
 	p.ensureDBVersion(ctx, defaultDbClient)
 
+	// Read before the rows: a reset between the two reads then shows up next
+	// scrape (a small double count) rather than as a forced reset of pre-reset
+	// lifetime totals.
+	statsReset := p.detectStatsReset(ctx, defaultDbClient, logger)
+
 	rows, err := defaultDbClient.getTopQuery(ctx, limit, p.excludedDatabases, logger)
 	if err != nil {
 		logger.Error("failed to get top query", zap.Error(err))
@@ -482,7 +505,6 @@ func (p *postgreSQLScraper) collectTopQuery(ctx context.Context, clientFactory p
 
 	pq := make(priorityqueue.PriorityQueue[map[string]any, float64], 0)
 
-	statsReset := false
 	var seeded, reset int64
 	for i, row := range rows {
 		// The template filters excluded databases server side; this guards the EXPLAIN
@@ -695,6 +717,44 @@ func (p *postgreSQLScraper) metricsVersionEnabled() bool {
 
 func (p *postgreSQLScraper) logsVersionEnabled() bool {
 	return p.config.LogsBuilderConfig.ResourceAttributes.DbSystemVersion.Enabled
+}
+
+// detectStatsReset reports whether pg_stat_statements_info.stats_reset changed
+// since the previous top_query scrape, i.e. every statement's counters restarted
+// within this interval. Without the view (PostgreSQL < 14) or after a failed
+// read it returns false and resets are detected from decreasing counters only.
+func (p *postgreSQLScraper) detectStatsReset(ctx context.Context, c client, logger *zap.Logger) bool {
+	if p.statStatementsInfo == statStatementsInfoUnsupported {
+		return false
+	}
+	info, err := c.getStatStatementsInfo(ctx)
+	if err != nil {
+		if isUndefinedTable(err) {
+			logger.Debug("pg_stat_statements_info is not available (PostgreSQL < 14 or pg_stat_statements < 1.9); top_query resets are detected from decreasing counters only", zap.Error(err))
+			p.statStatementsInfo = statStatementsInfoUnsupported
+			return false
+		}
+		logger.Debug("failed to read pg_stat_statements_info; top_query resets are detected from decreasing counters for this scrape", zap.Error(err))
+		p.statStatementsInfo = statStatementsInfoUnknown
+		return false
+	}
+
+	reset := false
+	if p.statStatementsInfo == statStatementsInfoKnown {
+		reset = info.statsReset.Valid && !info.statsReset.Time.Equal(p.lastStatsReset)
+		if info.dealloc > p.lastDealloc {
+			logger.Debug("pg_stat_statements deallocated statements since the previous scrape",
+				zap.Int64("deallocated", info.dealloc-p.lastDealloc))
+		}
+	}
+	if info.statsReset.Valid {
+		p.statStatementsInfo = statStatementsInfoKnown
+		p.lastStatsReset = info.statsReset.Time
+		p.lastDealloc = info.dealloc
+	} else {
+		p.statStatementsInfo = statStatementsInfoUnknown
+	}
+	return reset
 }
 
 func (p *postgreSQLScraper) ensureDBVersion(ctx context.Context, c client) {

@@ -2359,6 +2359,10 @@ func (*mockClient) explainQuery(context.Context, string, string, *zap.Logger) (s
 }
 
 // getTopQuery implements client.
+func (*mockClient) getStatStatementsInfo(context.Context) (statStatementsInfo, error) {
+	return statStatementsInfo{}, nil
+}
+
 func (*mockClient) getTopQuery(context.Context, int64, []string, *zap.Logger) ([]map[string]any, error) {
 	panic("unimplemented")
 }
