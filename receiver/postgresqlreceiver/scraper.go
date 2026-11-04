@@ -64,16 +64,17 @@ type postgreSQLScraper struct {
 	// toplevelSupported: pg_stat_statements 1.9+ on PostgreSQL 14+, which has the
 	// toplevel column and pg_stat_statements_info. Decided from server_version_num
 	// and the extension version; a positive result is cached until a 42P01/42703
-	// invalidates it, anything else is re-probed on every scrape.
+	// invalidates it, and a negative or failed result is re-probed at most every
+	// capabilityReprobeInterval.
 	toplevelSupported bool
-	// statsResetKnown/lastStatsReset/lastDealloc hold pg_stat_statements_info from
-	// the last top_query scrape that completed; they are committed only after the
-	// rows of that scrape were processed so a failed scrape cannot lose a reset.
 	// capabilitiesProbedAt is when a negative or failed capability probe last ran;
 	// the zero time forces a probe on the next scrape.
 	capabilitiesProbedAt time.Time
 	// now is the clock, injectable for tests.
-	now             func() time.Time
+	now func() time.Time
+	// statsResetKnown/lastStatsReset/lastDealloc hold pg_stat_statements_info from
+	// the last top_query scrape that completed; they are committed only after the
+	// rows of that scrape were processed so a failed scrape cannot lose a reset.
 	statsResetKnown bool
 	lastStatsReset  time.Time
 	lastDealloc     int64
@@ -554,7 +555,7 @@ func (p *postgreSQLScraper) collectTopQuery(ctx context.Context, clientFactory p
 		// pg_stat_statements is keyed on (userid, dbid, queryid, toplevel). userid is
 		// used here instead of rolname because rolname is empty once the role is
 		// dropped, which would collide two different dropped roles onto one key.
-		// On PostgreSQL 14+ toplevel is selected and appended: with
+		// With pg_stat_statements 1.9+ on PostgreSQL 14+ toplevel is selected and appended: with
 		// pg_stat_statements.track = 'all' the top-level and nested entries of one
 		// statement have independent counters and must not share a cache entry.
 		// One cache entry holds all of the statement's counters, so the statement is
@@ -778,18 +779,11 @@ func (p *postgreSQLScraper) logsVersionEnabled() bool {
 	return p.config.LogsBuilderConfig.ResourceAttributes.DbSystemVersion.Enabled
 }
 
-// cacheEventOutcomes holds the pre-built attribute option per cache outcome.
-var cacheEventOutcomes = map[metadata.AttributeOutcome]metric.AddOption{
-	metadata.AttributeOutcomeSeeded:     metric.WithAttributes(attribute.String("outcome", metadata.AttributeOutcomeSeeded.String())),
-	metadata.AttributeOutcomeEvicted:    metric.WithAttributes(attribute.String("outcome", metadata.AttributeOutcomeEvicted.String())),
-	metadata.AttributeOutcomeDuplicated: metric.WithAttributes(attribute.String("outcome", metadata.AttributeOutcomeDuplicated.String())),
-}
-
 // recordCacheEvents adds n to postgresql.top_query.cache.events for outcome;
 // zero counts are skipped so idle outcomes do not create data points.
 func (p *postgreSQLScraper) recordCacheEvents(ctx context.Context, outcome metadata.AttributeOutcome, n int64) {
 	if n > 0 {
-		p.telemetry.PostgresqlTopQueryCacheEvents.Add(ctx, n, cacheEventOutcomes[outcome])
+		p.telemetry.PostgresqlTopQueryCacheEvents.Add(ctx, n, metric.WithAttributes(attribute.String("outcome", outcome.String())))
 	}
 }
 
@@ -820,7 +814,8 @@ func (p *postgreSQLScraper) refreshStatStatementsCapabilities(ctx context.Contex
 }
 
 // invalidateStatStatementsCapabilities forgets the cached capabilities after an
-// undefined table/column error so the next scrape probes them again.
+// undefined table/column error so the next scrape probes them again. A missing
+// extension (42P01 from the row query on every scrape) therefore re-probes every scrape.
 func (p *postgreSQLScraper) invalidateStatStatementsCapabilities(logger *zap.Logger, err error) {
 	logger.Debug("pg_stat_statements capabilities changed; re-probing on the next scrape", zap.Error(err))
 	p.toplevelSupported = false
