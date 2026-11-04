@@ -741,7 +741,7 @@ func TestScrapeLogsFromContainer(t *testing.T) {
 		TelemetrySettings: component.TelemetrySettings{
 			Logger: zap.Must(zap.NewProduction()),
 		},
-	}, &cfg, clientFactory, newCache(1), newTTLCache[string](1000, time.Second))
+	}, &cfg, clientFactory, newCache(30*10*2), newTTLCache[string](1000, time.Second))
 	assert.NoError(t, err)
 	plogs, err := ns.scrapeQuerySamples(t.Context(), 30)
 	assert.NoError(t, err)
@@ -764,29 +764,19 @@ func TestScrapeLogsFromContainer(t *testing.T) {
 	assert.True(t, found, "Expected to find a log record with the query text")
 	assert.True(t, ns.newestQueryTimestamp > 0)
 
+	// The first top-query scrape seeds the delta cache and must not report the
+	// statement's lifetime totals.
 	firstTimeTopQueryPLogs, err := ns.scrapeTopQuery(t.Context(), 30, 30, 30, time.Minute)
 	assert.NoError(t, err)
-	logRecords = firstTimeTopQueryPLogs.ResourceLogs().At(0).ScopeLogs().At(0).LogRecords()
-	found = false
-	for _, record := range logRecords.All() {
-		attributes := record.Attributes().AsRaw()
-		queryAttribute, ok := attributes["db.query.text"]
-		query := strings.ToLower(queryAttribute.(string))
-		assert.True(t, ok)
-		if !strings.HasPrefix(query, "select * from test2 where") {
-			continue
+	for _, resourceLogs := range firstTimeTopQueryPLogs.ResourceLogs().All() {
+		for _, scopeLogs := range resourceLogs.ScopeLogs().All() {
+			for _, record := range scopeLogs.LogRecords().All() {
+				query, _ := record.Attributes().AsRaw()["db.query.text"].(string)
+				assert.False(t, strings.HasPrefix(strings.ToLower(query), "select * from test2 where"),
+					"first top query scrape must seed the cache, not emit lifetime totals")
+			}
 		}
-		assert.Equal(t, "select * from test2 where id = ?", query)
-		databaseAttribute, ok := attributes["db.namespace"]
-		assert.True(t, ok)
-		assert.Equal(t, "otel2", databaseAttribute.(string))
-		calls, ok := attributes["postgresql.calls"]
-		assert.True(t, ok)
-		assert.Equal(t, int64(1), calls.(int64))
-		assert.NotEmpty(t, attributes["postgresql.query_plan"])
-		found = true
 	}
-	assert.True(t, found, "Expected to find a log record with the query text from the first time top query")
 
 	_, err = db.Exec("Select * from test2 where id = 67")
 	assert.NoError(t, err)
@@ -811,10 +801,11 @@ func TestScrapeLogsFromContainer(t *testing.T) {
 		assert.Equal(t, "otel2", databaseAttribute.(string))
 		calls, ok := attributes["postgresql.calls"]
 		assert.True(t, ok)
-		assert.Equal(t, int64(2), calls.(int64))
+		assert.Equal(t, int64(1), calls.(int64), "second scrape reports the interval delta, not the lifetime total")
+		assert.NotEmpty(t, attributes["postgresql.query_plan"])
 		found = true
 	}
-	assert.True(t, found, "Expected to find a log record with the query text from the first time top query")
+	assert.True(t, found, "Expected to find a log record with the query text from the second time top query")
 }
 
 // pgvector image published on Docker Hub (same registry as the postgres image used
@@ -1205,4 +1196,124 @@ WHERE c.relname IN ('big_index_table', 'toasted_table') AND n.nspname = 'public'
 		assert.Greater(t, toastStats.size, toastRef.relationSize+toastRef.indexesSize,
 			"reported size must include TOAST data, not just the main heap and indexes")
 	}
+}
+
+// TestIntegrationTopQueryReset exercises the top_query delta semantics against a
+// real pg_stat_statements: a cold cache (first scrape, collector restart) must
+// seed rather than emit lifetime totals, and pg_stat_statements_reset() must be
+// reported as a reset rather than a 0 blackout until the counter climbs past
+// the stale cached value.
+func TestIntegrationTopQueryReset(t *testing.T) {
+	ci, err := testcontainers.GenericContainer(
+		t.Context(),
+		testcontainers.GenericContainerRequest{
+			ContainerRequest: testcontainers.ContainerRequest{
+				Image: fmt.Sprintf("postgres:%s", post17TestVersion),
+				Env: map[string]string{
+					"POSTGRES_USER":     "root",
+					"POSTGRES_PASSWORD": "otel",
+					"POSTGRES_DB":       "otel",
+				},
+				Files: []testcontainers.ContainerFile{
+					{
+						HostFilePath:      filepath.Join("testdata", "integration", "01-init.sql"),
+						ContainerFilePath: "/docker-entrypoint-initdb.d/01-init.sql",
+						FileMode:          700,
+					},
+					{
+						HostFilePath:      filepath.Join("testdata", "integration", "02-create-extension.sh"),
+						ContainerFilePath: "/docker-entrypoint-initdb.d/02-create-extension.sh",
+						FileMode:          700,
+					},
+				},
+				ExposedPorts: []string{postgresqlPort},
+				Cmd:          []string{"-c", "shared_preload_libraries=pg_stat_statements"},
+				// See tableCountEquivalenceTest: the second readiness line is the real server.
+				WaitingFor: wait.ForLog("database system is ready to accept connections").
+					WithOccurrence(2).
+					WithStartupTimeout(2 * time.Minute),
+			},
+		},
+	)
+	require.NoError(t, err)
+	defer testcontainers.CleanupContainer(t, ci)
+	require.NoError(t, ci.Start(t.Context()))
+
+	p, err := ci.MappedPort(t.Context(), postgresqlPort)
+	require.NoError(t, err)
+	workload, err := sql.Open("postgres", fmt.Sprintf("postgres://root:otel@localhost:%s/otel2?sslmode=disable", p.Port()))
+	require.NoError(t, err)
+	defer workload.Close()
+
+	runWorkload := func(n int) {
+		t.Helper()
+		for range n {
+			_, execErr := workload.ExecContext(t.Context(), "SELECT * FROM test2 WHERE id = 67")
+			require.NoError(t, execErr)
+		}
+	}
+
+	cfg := createDefaultConfig().(*Config)
+	cfg.Databases = []string{"postgres"}
+	cfg.Username = "otelu"
+	cfg.Password = "otelp"
+	cfg.ConnectDatabase = "postgres"
+	cfg.ClientConfig = configtls.ClientConfig{Insecure: true}
+	cfg.AddrConfig = confignet.AddrConfig{Endpoint: net.JoinHostPort("localhost", p.Port())}
+	cfg.LogsBuilderConfig.Events.DbServerTopQuery.Enabled = true
+	cfg.TopQueryCollection.MaxRowsPerQuery = 100
+	cfg.TopQueryCollection.TopNQuery = 100
+	cfg.TopQueryCollection.MaxExplainEachInterval = 0
+
+	settings := receiver.Settings{TelemetrySettings: component.TelemetrySettings{Logger: zap.Must(zap.NewDevelopment())}}
+	newScraper := func() *postgreSQLScraper {
+		t.Helper()
+		s, scraperErr := newTopQueryScraper(settings, cfg, newDefaultClientFactory(cfg))
+		require.NoError(t, scraperErr)
+		return s
+	}
+
+	// targetCalls returns the postgresql.calls values emitted for the workload statement.
+	targetCalls := func(s *postgreSQLScraper) []int64 {
+		t.Helper()
+		logs, scrapeErr := s.scrapeTopQuery(t.Context(), cfg.TopQueryCollection.MaxRowsPerQuery, cfg.TopQueryCollection.TopNQuery, cfg.TopQueryCollection.MaxExplainEachInterval, 0)
+		require.NoError(t, scrapeErr)
+		var calls []int64
+		for _, rl := range logs.ResourceLogs().All() {
+			for _, sl := range rl.ScopeLogs().All() {
+				for _, record := range sl.LogRecords().All() {
+					attributes := record.Attributes().AsRaw()
+					query, _ := attributes["db.query.text"].(string)
+					if attributes["db.namespace"] != "otel2" || !strings.HasPrefix(strings.ToLower(query), "select * from test2 where") {
+						continue
+					}
+					calls = append(calls, attributes["postgresql.calls"].(int64))
+				}
+			}
+		}
+		return calls
+	}
+
+	scraper := newScraper()
+	runWorkload(1000)
+	assert.Empty(t, targetCalls(scraper), "first scrape must seed, not emit the lifetime total")
+	runWorkload(10)
+	assert.Equal(t, []int64{10}, targetCalls(scraper))
+
+	_, err = workload.ExecContext(t.Context(), "SELECT pg_stat_statements_reset()")
+	require.NoError(t, err)
+	runWorkload(5)
+	assert.Equal(t, []int64{5}, targetCalls(scraper), "after pg_stat_statements_reset() the new counter must be reported, not 0")
+	runWorkload(3)
+	assert.Equal(t, []int64{3}, targetCalls(scraper), "the cache must be re-seeded after a reset")
+
+	// Simulated collector restart: a new scraper starts with an empty cache while
+	// the statement's lifetime total is now well above 1000.
+	runWorkload(1000)
+	restarted := newScraper()
+	for _, calls := range targetCalls(restarted) {
+		assert.Less(t, calls, int64(1000), "a restarted collector must not emit the lifetime total")
+	}
+	runWorkload(7)
+	assert.Equal(t, []int64{7}, targetCalls(restarted))
 }
