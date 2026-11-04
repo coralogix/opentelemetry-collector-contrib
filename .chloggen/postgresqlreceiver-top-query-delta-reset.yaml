@@ -16,9 +16,8 @@ issues: []
 # These lines will be padded with 2 spaces and then inserted directly into the document.
 # Use pipe (|) for multiline entries.
 subtext: |
-  Unseen or evicted statements are now seeded (reported as 0) instead of reporting their lifetime totals; seeds and evictions are counted by the new `postgresql.top_query.cache.seeded` and `postgresql.top_query.cache.evicted` internal telemetry metrics.
-  Resets are detected from `pg_stat_statements_info.stats_reset` on PostgreSQL 14+ and from decreasing counters otherwise.
-  On PostgreSQL 14+ with `pg_stat_statements.track = 'all'`, top-level and nested entries of a statement no longer reset each other; they are reported as one record with summed deltas.
+  Unseen or evicted statements now report 0 for their first interval instead of lifetime totals; resets use `pg_stat_statements_info.stats_reset` where available.
+  Top-level and nested entries (`track = 'all'`) are reported as one record per statement; before pg_stat_statements 1.9 they are summed in the top_query SQL.
 
 # If your change doesn't affect end users or the exported elements of any package,
 # you should mark this change as internal. Optional value: ['user', 'api']
