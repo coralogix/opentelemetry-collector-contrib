@@ -1213,6 +1213,7 @@ func TestIntegrationTopQueryReset(t *testing.T) {
 // topQueryHarness is a PostgreSQL container with pg_stat_statements plus
 // helpers to drive the top_query scraper against it.
 type topQueryHarness struct {
+	port        string
 	workload    *sql.DB
 	observed    *observer.ObservedLogs
 	runWorkload func(n int)
@@ -1315,6 +1316,7 @@ func startTopQueryHarness(t *testing.T, pgVersion string, extraArgs ...string) *
 	}
 
 	return &topQueryHarness{
+		port:        p.Port(),
 		workload:    workload,
 		observed:    observed,
 		runWorkload: runWorkload,
@@ -1331,6 +1333,16 @@ func testTopQueryReset(t *testing.T, pgVersion string, hasStatStatementsInfo boo
 		t.Helper()
 		_, resetErr := workload.ExecContext(t.Context(), "SELECT pg_stat_statements_reset()")
 		require.NoError(t, resetErr)
+	}
+
+	if !hasStatStatementsInfo {
+		// Before pg_stat_statements 1.9 an entry is keyed on (userid, dbid, queryid)
+		// only, so the grouped top_query SQL used there is a no-op.
+		runWorkload(1)
+		var splitStatements int
+		require.NoError(t, workload.QueryRowContext(t.Context(), `SELECT count(*) FROM (
+  SELECT 1 FROM pg_stat_statements GROUP BY userid, dbid, queryid HAVING count(*) > 1) split`).Scan(&splitStatements))
+		assert.Zero(t, splitStatements)
 	}
 
 	scraper := newScraper()
@@ -1378,12 +1390,30 @@ func testTopQueryReset(t *testing.T, pgVersion string, hasStatStatementsInfo boo
 
 // TestIntegrationTopQueryResetToplevel runs with pg_stat_statements.track = 'all':
 // the workload statement then has a top-level and a nested entry with the same
-// (userid, dbid, queryid). They must keep independent cache entries instead of
-// resetting each other on every scrape, and are emitted as one record whose
-// deltas are their sum.
+// (userid, dbid, queryid). They must not reset each other on every scrape and
+// are emitted as one record whose deltas are their sum:
+//   - pg_stat_statements 1.9+: toplevel is selected, per-entry cache keys, merged in the scraper;
+//   - pg_stat_statements 1.8 on PostgreSQL 17 (as after pg_upgrade without
+//     ALTER EXTENSION UPDATE): no toplevel column, entries summed in SQL.
 func TestIntegrationTopQueryResetToplevel(t *testing.T) {
+	t.Run("pgss_latest", func(t *testing.T) { testTopQueryToplevel(t, "") })
+	t.Run("pgss_1_8", func(t *testing.T) { testTopQueryToplevel(t, "1.8") })
+}
+
+func testTopQueryToplevel(t *testing.T, extVersion string) {
 	h := startTopQueryHarness(t, post17TestVersion, "-c", "pg_stat_statements.track=all")
-	_, err := h.workload.ExecContext(t.Context(), `CREATE FUNCTION run_target() RETURNS void LANGUAGE plpgsql AS $$
+	connectDB, err := sql.Open("postgres", fmt.Sprintf("postgres://root:otel@localhost:%s/postgres?sslmode=disable", h.port))
+	require.NoError(t, err)
+	t.Cleanup(func() { connectDB.Close() })
+	if extVersion != "" {
+		// The receiver probes and queries the view in its connect database.
+		_, err = connectDB.ExecContext(t.Context(), "DROP EXTENSION pg_stat_statements")
+		require.NoError(t, err)
+		_, err = connectDB.ExecContext(t.Context(), fmt.Sprintf("CREATE EXTENSION pg_stat_statements VERSION '%s'", extVersion))
+		require.NoError(t, err)
+	}
+
+	_, err = h.workload.ExecContext(t.Context(), `CREATE FUNCTION run_target() RETURNS void LANGUAGE plpgsql AS $$
 BEGIN
   PERFORM * FROM test2 WHERE id = 67;
 END $$`)
@@ -1399,14 +1429,15 @@ END $$`)
 	h.runWorkload(100)
 	runNested(40)
 
-	// Fixture precondition: the nested execution shares the top-level entry's queryid.
-	var entries int
-	require.NoError(t, h.workload.QueryRowContext(t.Context(), `SELECT count(DISTINCT toplevel) FROM pg_stat_statements
-WHERE queryid = (SELECT queryid FROM pg_stat_statements WHERE query = 'SELECT * FROM test2 WHERE id = $1' AND toplevel LIMIT 1)`).Scan(&entries))
-	require.Equal(t, 2, entries, "fixture must produce a top-level and a nested entry for one queryid")
+	// Fixture precondition: a statement has two entries for one (userid, dbid, queryid).
+	var splitStatements int
+	require.NoError(t, connectDB.QueryRowContext(t.Context(), `SELECT count(*) FROM (
+  SELECT 1 FROM pg_stat_statements GROUP BY userid, dbid, queryid HAVING count(*) > 1) split`).Scan(&splitStatements))
+	require.Positive(t, splitStatements, "fixture must produce a top-level and a nested entry for one queryid")
 
 	scraper := h.newScraper()
 	assert.Empty(t, h.targetCalls(scraper), "first scrape seeds both entries")
+	assert.Equal(t, extVersion == "", scraper.toplevelSupported, "toplevel is selected only with pg_stat_statements 1.9+")
 	h.runWorkload(10)
 	runNested(3)
 	assert.Equal(t, []int64{13}, h.targetCalls(scraper), "one record per statement: 10 top-level + 3 nested calls")
@@ -1414,7 +1445,10 @@ WHERE queryid = (SELECT queryid FROM pg_stat_statements WHERE query = 'SELECT * 
 	runNested(1)
 	assert.Equal(t, []int64{3}, h.targetCalls(scraper))
 
-	for _, entry := range h.observed.FilterMessage("top_query delta cache").AllUntimed() {
-		assert.Equal(t, int64(0), entry.ContextMap()["reset"], "top-level and nested entries must not reset each other")
+	cacheLogs := h.observed.FilterMessage("top_query delta cache").AllUntimed()
+	for i := range cacheLogs {
+		fields := cacheLogs[i].ContextMap()
+		assert.Equal(t, int64(0), fields["reset"], "top-level and nested entries must not reset each other")
+		assert.Equal(t, int64(0), fields["duplicated"])
 	}
 }

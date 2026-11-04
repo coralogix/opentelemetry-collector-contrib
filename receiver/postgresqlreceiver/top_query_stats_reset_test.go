@@ -19,6 +19,7 @@ import (
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/receiver"
 	"go.opentelemetry.io/collector/receiver/receivertest"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata/metricdatatest"
 	"go.uber.org/zap"
@@ -30,9 +31,10 @@ import (
 )
 
 const (
-	statStatementsInfoPattern   = "pg_stat_statements_info"
-	statStatementsCapsPattern   = "pg_extension"
-	topQueryRowsPattern         = "LIMIT 3"
+	statStatementsInfoPattern = "pg_stat_statements_info"
+	statStatementsCapsPattern = "pg_extension"
+	// Without toplevel the row query groups entries per statement server side.
+	topQueryRowsPattern         = `SUM\(calls\) AS calls[\s\S]*GROUP BY[\s\S]*LIMIT 3`
 	topQueryToplevelRowsPattern = `toplevel::TEXT[\s\S]*LIMIT 3`
 )
 
@@ -45,6 +47,18 @@ type topQueryTestScraper struct {
 	*postgreSQLScraper
 	mock     sqlmock.Sqlmock
 	observed *observer.ObservedLogs
+	clock    time.Time
+}
+
+// advance moves the scraper's injected clock forward.
+func (s *topQueryTestScraper) advance(d time.Duration) {
+	s.clock = s.clock.Add(d)
+}
+
+// probeFailures counts failed capability probes. sqlmock rejects an unexpected
+// probe query with an error, so this also catches probes that should not happen.
+func (s *topQueryTestScraper) probeFailures() int {
+	return s.observed.FilterMessageSnippet("failed to probe pg_stat_statements capabilities").Len()
 }
 
 func newTopQueryTestScraper(t *testing.T, opts ...func(*Config, *receiver.Settings)) *topQueryTestScraper {
@@ -70,7 +84,9 @@ func newTopQueryTestScraper(t *testing.T, opts ...func(*Config, *receiver.Settin
 	}
 	scraper, err := newTopQueryScraper(settings, cfg, mockSimpleClientFactory{db: db})
 	require.NoError(t, err)
-	return &topQueryTestScraper{postgreSQLScraper: scraper, mock: mock, observed: observed}
+	s := &topQueryTestScraper{postgreSQLScraper: scraper, mock: mock, observed: observed, clock: t1}
+	scraper.now = func() time.Time { return s.clock }
+	return s
 }
 
 func (s *topQueryTestScraper) expectCapabilities(serverVersionNum int64, extVersion string) {
@@ -191,9 +207,10 @@ func TestTopQueryStatsResetSurvivesRowsFailure(t *testing.T) {
 }
 
 // TestTopQueryWithoutToplevelSupportReprobes covers PostgreSQL < 14 (or
-// pg_stat_statements < 1.9): no toplevel, no pg_stat_statements_info, the
-// decreasing-counter heuristic, and a capability probe on every scrape so an
-// upgrade is picked up without a collector restart.
+// pg_stat_statements < 1.9): no toplevel, no pg_stat_statements_info, rows
+// grouped per statement in SQL, the decreasing-counter heuristic, and a
+// capability re-probe at most every 10 minutes so an upgrade is picked up
+// without a collector restart.
 func TestTopQueryWithoutToplevelSupportReprobes(t *testing.T) {
 	s := newTopQueryTestScraper(t)
 
@@ -202,12 +219,34 @@ func TestTopQueryWithoutToplevelSupportReprobes(t *testing.T) {
 	assert.Empty(t, s.calls(t))
 	assert.False(t, s.toplevelSupported)
 
-	s.expectCapabilities(130018, "1.8")
+	s.advance(time.Minute)
 	s.expectRows(topQueryRowsPattern, []string{"42", "1010"})
-	assert.Equal(t, []int64{10}, s.calls(t))
+	assert.Equal(t, []int64{10}, s.calls(t), "no re-probe within 10 minutes of a negative result")
+	s.advance(10 * time.Minute)
 	s.expectCapabilities(130018, "1.8")
 	s.expectRows(topQueryRowsPattern, []string{"42", "5"})
 	assert.Equal(t, []int64{5}, s.calls(t), "a decreased counter is still reported as a reset")
+	assert.Zero(t, s.probeFailures(), "no unexpected capability probe")
+}
+
+// TestTopQueryWithoutToplevelAggregatesInSQL covers PostgreSQL 14+ with
+// pg_stat_statements < 1.9 (common after pg_upgrade) and track = 'all': the
+// top-level and nested entries cannot be told apart, so the row query sums them
+// per statement before ORDER BY/LIMIT. Row order or LIMIT can then no longer
+// make one entry be compared against the other's cached counters.
+func TestTopQueryWithoutToplevelAggregatesInSQL(t *testing.T) {
+	s := newTopQueryTestScraper(t)
+
+	s.expectCapabilities(170002, "1.8")
+	s.expectRows(topQueryRowsPattern, []string{"42", "1050"})
+	assert.Empty(t, s.calls(t))
+	assert.False(t, s.toplevelSupported)
+	s.expectRows(topQueryRowsPattern, []string{"42", "1065"})
+	assert.Equal(t, []int64{15}, s.calls(t))
+	for _, entry := range s.observed.FilterMessage("top_query delta cache").AllUntimed() {
+		assert.Equal(t, int64(0), entry.ContextMap()["reset"])
+	}
+	assert.Zero(t, s.probeFailures())
 }
 
 func TestTopQueryToplevelCapabilityIsNotLatched(t *testing.T) {
@@ -253,6 +292,12 @@ func TestTopQueryToplevelCapabilityIsNotLatched(t *testing.T) {
 		s.calls(t)
 		assert.False(t, s.toplevelSupported)
 
+		s.advance(5 * time.Minute)
+		s.expectRows(topQueryRowsPattern, []string{"42", "1010"})
+		s.calls(t)
+		assert.False(t, s.toplevelSupported, "a negative result is re-probed at most every 10 minutes")
+
+		s.advance(5 * time.Minute)
 		s.expectCapabilities(170002, "1.11")
 		s.expectInfo(0, t1)
 		s.expectRows(topQueryToplevelRowsPattern, []string{"42", "1010", "true"})
@@ -277,13 +322,20 @@ func TestTopQueryToplevelCapabilityIsNotLatched(t *testing.T) {
 		assert.True(t, s.toplevelSupported)
 	})
 
-	t.Run("transient probe failure on cold start is retried", func(t *testing.T) {
+	t.Run("transient probe failure on cold start is retried after 10 minutes", func(t *testing.T) {
 		s := newTopQueryTestScraper(t)
 		s.mock.ExpectQuery(statStatementsCapsPattern).WillReturnError(errors.New("connection reset by peer"))
 		s.expectRows(topQueryRowsPattern, []string{"42", "1000"})
 		s.calls(t)
 		assert.False(t, s.toplevelSupported)
+		assert.Equal(t, 1, s.probeFailures())
 
+		s.advance(time.Minute)
+		s.expectRows(topQueryRowsPattern, []string{"42", "1000"})
+		s.calls(t)
+		assert.Equal(t, 1, s.probeFailures(), "a failed probe is retried at most every 10 minutes")
+
+		s.advance(10 * time.Minute)
 		s.expectCapabilities(170002, "1.11")
 		s.expectInfo(0, t1)
 		s.expectRows(topQueryToplevelRowsPattern, []string{"42", "1000", "true"})
@@ -372,12 +424,13 @@ func TestTopQueryDuplicateCacheKeyIsNotCompared(t *testing.T) {
 	s.expectCapabilities(130018, "1.8")
 	s.expectRows(topQueryRowsPattern, []string{"42", "1000"}, []string{"42", "50"})
 	assert.Empty(t, s.calls(t))
-	s.expectCapabilities(130018, "1.8")
 	s.expectRows(topQueryRowsPattern, []string{"42", "1010"}, []string{"42", "55"})
 	assert.Equal(t, []int64{10}, s.calls(t), "only the first row of a duplicated key is compared against the cache")
 
-	metadatatest.AssertEqualPostgresqlTopQueryCacheDuplicated(t, tel,
-		[]metricdata.DataPoint[int64]{{Value: 2}}, metricdatatest.IgnoreTimestamp())
+	metadatatest.AssertEqualPostgresqlTopQueryCacheEvents(t, tel, []metricdata.DataPoint[int64]{
+		{Attributes: attribute.NewSet(attribute.String("outcome", "seeded")), Value: 1},
+		{Attributes: attribute.NewSet(attribute.String("outcome", "duplicated")), Value: 2},
+	}, metricdatatest.IgnoreTimestamp())
 	for _, entry := range s.observed.FilterMessage("top_query delta cache").AllUntimed() {
 		assert.Equal(t, int64(1), entry.ContextMap()["duplicated"])
 		assert.Equal(t, int64(0), entry.ContextMap()["reset"])

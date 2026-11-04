@@ -21,10 +21,10 @@ func NewSettings(tt *componenttest.Telemetry) receiver.Settings {
 	return set
 }
 
-func AssertEqualPostgresqlTopQueryCacheDuplicated(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...metricdatatest.Option) {
+func AssertEqualPostgresqlTopQueryCacheEvents(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...metricdatatest.Option) {
 	want := metricdata.Metrics{
-		Name:        "otelcol_postgresql.top_query.cache.duplicated",
-		Description: "Number of top_query rows whose delta cache key already appeared in the same scrape. The duplicate is reported with a zero delta instead of being compared against the other row. [Development]",
+		Name:        "otelcol_postgresql.top_query.cache.events",
+		Description: "Number of statements handled by the top_query delta cache without reporting a true interval delta, by outcome. Seeded and duplicated statements report a zero delta for the interval; an evicted statement is seeded again on its next scrape. [Development]",
 		Unit:        "{statement}",
 		Data: metricdata.Sum[int64]{
 			Temporality: metricdata.CumulativeTemporality,
@@ -32,39 +32,7 @@ func AssertEqualPostgresqlTopQueryCacheDuplicated(t *testing.T, tt *componenttes
 			DataPoints:  dps,
 		},
 	}
-	got, err := tt.GetMetric("otelcol_postgresql.top_query.cache.duplicated")
-	require.NoError(t, err)
-	metricdatatest.AssertEqual(t, want, got, opts...)
-}
-
-func AssertEqualPostgresqlTopQueryCacheEvicted(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...metricdatatest.Option) {
-	want := metricdata.Metrics{
-		Name:        "otelcol_postgresql.top_query.cache.evicted",
-		Description: "Number of statements evicted from the top_query delta cache. An evicted statement is re-seeded on its next scrape and reports a zero delta for that interval. [Development]",
-		Unit:        "{statement}",
-		Data: metricdata.Sum[int64]{
-			Temporality: metricdata.CumulativeTemporality,
-			IsMonotonic: true,
-			DataPoints:  dps,
-		},
-	}
-	got, err := tt.GetMetric("otelcol_postgresql.top_query.cache.evicted")
-	require.NoError(t, err)
-	metricdatatest.AssertEqual(t, want, got, opts...)
-}
-
-func AssertEqualPostgresqlTopQueryCacheSeeded(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...metricdatatest.Option) {
-	want := metricdata.Metrics{
-		Name:        "otelcol_postgresql.top_query.cache.seeded",
-		Description: "Number of statements seeded in the top_query delta cache (not seen before, or evicted) and reported with a zero delta for that interval. [Development]",
-		Unit:        "{statement}",
-		Data: metricdata.Sum[int64]{
-			Temporality: metricdata.CumulativeTemporality,
-			IsMonotonic: true,
-			DataPoints:  dps,
-		},
-	}
-	got, err := tt.GetMetric("otelcol_postgresql.top_query.cache.seeded")
+	got, err := tt.GetMetric("otelcol_postgresql.top_query.cache.events")
 	require.NoError(t, err)
 	metricdatatest.AssertEqual(t, want, got, opts...)
 }

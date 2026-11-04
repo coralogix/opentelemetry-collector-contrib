@@ -1031,9 +1031,18 @@ func TestTopQueryTemplateRendering(t *testing.T) {
 
 			rendered := buf.String()
 			assert.Contains(t, rendered, "LIMIT 10;")
-			if !tc.toplevel {
-				assert.NotContains(t, rendered, "toplevel", "PostgreSQL < 14 has no toplevel column")
-				assert.Contains(t, rendered, "total_plan_time\nFROM")
+			if tc.toplevel {
+				// Per-entry rows: the scraper keys on toplevel and merges the entries.
+				assert.NotContains(t, rendered, "GROUP BY")
+			} else {
+				// Without toplevel, entries that share (userid, dbid, queryid) are summed
+				// server side, before ORDER BY/LIMIT, so LIMIT applies to whole statements
+				// and the sum does not depend on row order.
+				assert.NotContains(t, rendered, "toplevel", "no toplevel column before pg_stat_statements 1.9")
+				assert.Contains(t, rendered, "SUM(calls) AS calls,")
+				assert.Contains(t, rendered, "SUM(total_exec_time) AS total_exec_time,")
+				assert.Contains(t, rendered, "MAX(query) AS query,")
+				assert.Contains(t, rendered, "GROUP BY pg_stat_statements.userid, pg_stat_statements.dbid, pg_stat_statements.queryid, datname, rolname\nORDER BY calls DESC")
 			}
 
 			if tc.expectedClause == "" {

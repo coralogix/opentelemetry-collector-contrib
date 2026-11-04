@@ -22,12 +22,10 @@ func Tracer(settings component.TelemetrySettings) trace.Tracer {
 // TelemetryBuilder provides an interface for components to report telemetry
 // as defined in metadata and user config.
 type TelemetryBuilder struct {
-	meter                             metric.Meter
-	mu                                sync.Mutex
-	registrations                     []metric.Registration
-	PostgresqlTopQueryCacheDuplicated metric.Int64Counter
-	PostgresqlTopQueryCacheEvicted    metric.Int64Counter
-	PostgresqlTopQueryCacheSeeded     metric.Int64Counter
+	meter                         metric.Meter
+	mu                            sync.Mutex
+	registrations                 []metric.Registration
+	PostgresqlTopQueryCacheEvents metric.Int64Counter
 }
 
 // TelemetryBuilderOption applies changes to default builder.
@@ -59,21 +57,9 @@ func NewTelemetryBuilder(settings component.TelemetrySettings, options ...Teleme
 	}
 	builder.meter = Meter(settings)
 	var err, errs error
-	builder.PostgresqlTopQueryCacheDuplicated, err = builder.meter.Int64Counter(
-		"otelcol_postgresql.top_query.cache.duplicated",
-		metric.WithDescription("Number of top_query rows whose delta cache key already appeared in the same scrape. The duplicate is reported with a zero delta instead of being compared against the other row. [Development]"),
-		metric.WithUnit("{statement}"),
-	)
-	errs = errors.Join(errs, err)
-	builder.PostgresqlTopQueryCacheEvicted, err = builder.meter.Int64Counter(
-		"otelcol_postgresql.top_query.cache.evicted",
-		metric.WithDescription("Number of statements evicted from the top_query delta cache. An evicted statement is re-seeded on its next scrape and reports a zero delta for that interval. [Development]"),
-		metric.WithUnit("{statement}"),
-	)
-	errs = errors.Join(errs, err)
-	builder.PostgresqlTopQueryCacheSeeded, err = builder.meter.Int64Counter(
-		"otelcol_postgresql.top_query.cache.seeded",
-		metric.WithDescription("Number of statements seeded in the top_query delta cache (not seen before, or evicted) and reported with a zero delta for that interval. [Development]"),
+	builder.PostgresqlTopQueryCacheEvents, err = builder.meter.Int64Counter(
+		"otelcol_postgresql.top_query.cache.events",
+		metric.WithDescription("Number of statements handled by the top_query delta cache without reporting a true interval delta, by outcome. Seeded and duplicated statements report a zero delta for the interval; an evicted statement is seeded again on its next scrape. [Development]"),
 		metric.WithUnit("{statement}"),
 	)
 	errs = errors.Join(errs, err)

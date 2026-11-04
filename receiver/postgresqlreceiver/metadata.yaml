@@ -156,6 +156,13 @@ attributes:
     type: string
     enum: [ins, upd, del, hot_upd]
     requirement_level: recommended
+  outcome:
+    description: How the top_query delta cache handled a statement.
+    type: string
+    enum:
+      - seeded
+      - evicted
+      - duplicated
   postgresql.application_name:
     description: Name of the application that is connected to this backend.
     type: string
@@ -809,27 +816,12 @@ metrics:
 
 telemetry:
   metrics:
-    postgresql.top_query.cache.duplicated:
+    postgresql.top_query.cache.events:
       enabled: true
-      description: Number of top_query rows whose delta cache key already appeared in the same scrape. The duplicate is reported with a zero delta instead of being compared against the other row.
+      description: Number of statements handled by the top_query delta cache without reporting a true interval delta, by outcome. Seeded and duplicated statements report a zero delta for the interval; an evicted statement is seeded again on its next scrape.
       stability: development
       unit: "{statement}"
-      sum:
-        value_type: int
-        monotonic: true
-    postgresql.top_query.cache.evicted:
-      enabled: true
-      description: Number of statements evicted from the top_query delta cache. An evicted statement is re-seeded on its next scrape and reports a zero delta for that interval.
-      stability: development
-      unit: "{statement}"
-      sum:
-        value_type: int
-        monotonic: true
-    postgresql.top_query.cache.seeded:
-      enabled: true
-      description: Number of statements seeded in the top_query delta cache (not seen before, or evicted) and reported with a zero delta for that interval.
-      stability: development
-      unit: "{statement}"
+      attributes: [outcome]
       sum:
         value_type: int
         monotonic: true

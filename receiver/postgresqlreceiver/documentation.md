@@ -759,29 +759,19 @@ top query
 
 The following telemetry is emitted by this component.
 
-### otelcol_postgresql.top_query.cache.duplicated
+### otelcol_postgresql.top_query.cache.events
 
-Number of top_query rows whose delta cache key already appeared in the same scrape. The duplicate is reported with a zero delta instead of being compared against the other row.
-
-| Unit | Metric Type | Value Type | Monotonic | Stability |
-| ---- | ----------- | ---------- | --------- | --------- |
-| {statement} | Sum | Int | true | Development |
-
-### otelcol_postgresql.top_query.cache.evicted
-
-Number of statements evicted from the top_query delta cache. An evicted statement is re-seeded on its next scrape and reports a zero delta for that interval.
+Number of statements handled by the top_query delta cache without reporting a true interval delta, by outcome. Seeded and duplicated statements report a zero delta for the interval; an evicted statement is seeded again on its next scrape.
 
 | Unit | Metric Type | Value Type | Monotonic | Stability |
 | ---- | ----------- | ---------- | --------- | --------- |
 | {statement} | Sum | Int | true | Development |
 
-### otelcol_postgresql.top_query.cache.seeded
+#### Attributes
 
-Number of statements seeded in the top_query delta cache (not seen before, or evicted) and reported with a zero delta for that interval.
-
-| Unit | Metric Type | Value Type | Monotonic | Stability |
-| ---- | ----------- | ---------- | --------- | --------- |
-| {statement} | Sum | Int | true | Development |
+| Name | Description | Values | Semantic Convention |
+| ---- | ----------- | ------ | ------------------- |
+| outcome | How the top_query delta cache handled a statement. | Str: ``seeded``, ``evicted``, ``duplicated`` | - |
 
 ## Feature Gates
 

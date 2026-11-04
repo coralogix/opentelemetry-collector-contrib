@@ -27,6 +27,8 @@ import (
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/receiver"
 	"go.opentelemetry.io/collector/scraper/scrapererror"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 	conventions "go.opentelemetry.io/otel/semconv/v1.43.0"
 	"go.uber.org/zap"
 
@@ -67,6 +69,11 @@ type postgreSQLScraper struct {
 	// statsResetKnown/lastStatsReset/lastDealloc hold pg_stat_statements_info from
 	// the last top_query scrape that completed; they are committed only after the
 	// rows of that scrape were processed so a failed scrape cannot lose a reset.
+	// capabilitiesProbedAt is when a negative or failed capability probe last ran;
+	// the zero time forces a probe on the next scrape.
+	capabilitiesProbedAt time.Time
+	// now is the clock, injectable for tests.
+	now             func() time.Time
 	statsResetKnown bool
 	lastStatsReset  time.Time
 	lastDealloc     int64
@@ -153,6 +160,7 @@ func newPostgreSQLScraper(
 		excludes:           excludes,
 		cache:              cache,
 		telemetry:          telemetryBuilder,
+		now:                time.Now,
 		queryPlanCache:     queryPlanCache,
 		separateSchemaAttr: separateSchemaAttr,
 		serviceInstanceID:  serviceInstanceID,
@@ -636,9 +644,9 @@ func (p *postgreSQLScraper) collectTopQuery(ctx context.Context, clientFactory p
 	}
 
 	evicted := p.cache.takeEvictions()
-	p.telemetry.PostgresqlTopQueryCacheSeeded.Add(ctx, seeded)
-	p.telemetry.PostgresqlTopQueryCacheEvicted.Add(ctx, evicted)
-	p.telemetry.PostgresqlTopQueryCacheDuplicated.Add(ctx, duplicated)
+	p.recordCacheEvents(ctx, metadata.AttributeOutcomeSeeded, seeded)
+	p.recordCacheEvents(ctx, metadata.AttributeOutcomeEvicted, evicted)
+	p.recordCacheEvents(ctx, metadata.AttributeOutcomeDuplicated, duplicated)
 	logger.Debug("top_query delta cache",
 		zap.Int64("seeded", seeded),
 		zap.Int64("evicted", evicted),
@@ -770,14 +778,39 @@ func (p *postgreSQLScraper) logsVersionEnabled() bool {
 	return p.config.LogsBuilderConfig.ResourceAttributes.DbSystemVersion.Enabled
 }
 
+// cacheEventOutcomes holds the pre-built attribute option per cache outcome.
+var cacheEventOutcomes = map[metadata.AttributeOutcome]metric.AddOption{
+	metadata.AttributeOutcomeSeeded:     metric.WithAttributes(attribute.String("outcome", metadata.AttributeOutcomeSeeded.String())),
+	metadata.AttributeOutcomeEvicted:    metric.WithAttributes(attribute.String("outcome", metadata.AttributeOutcomeEvicted.String())),
+	metadata.AttributeOutcomeDuplicated: metric.WithAttributes(attribute.String("outcome", metadata.AttributeOutcomeDuplicated.String())),
+}
+
+// recordCacheEvents adds n to postgresql.top_query.cache.events for outcome;
+// zero counts are skipped so idle outcomes do not create data points.
+func (p *postgreSQLScraper) recordCacheEvents(ctx context.Context, outcome metadata.AttributeOutcome, n int64) {
+	if n > 0 {
+		p.telemetry.PostgresqlTopQueryCacheEvents.Add(ctx, n, cacheEventOutcomes[outcome])
+	}
+}
+
+// capabilityReprobeInterval bounds how often a negative or failed capability
+// probe is repeated.
+const capabilityReprobeInterval = 10 * time.Minute
+
 // refreshStatStatementsCapabilities decides toplevel/pg_stat_statements_info
 // support from server_version_num and the pg_stat_statements extension version.
-// A positive result is cached; a negative or unknown one is re-probed on every
-// scrape so an extension created or updated after start is picked up.
+// A positive result is cached. A negative or failed probe is repeated at most
+// every capabilityReprobeInterval, so an extension created or updated after
+// start is picked up without a restart; an invalidation forces the next probe.
 func (p *postgreSQLScraper) refreshStatStatementsCapabilities(ctx context.Context, c client, logger *zap.Logger) {
 	if p.toplevelSupported {
 		return
 	}
+	now := p.now()
+	if !p.capabilitiesProbedAt.IsZero() && now.Sub(p.capabilitiesProbedAt) < capabilityReprobeInterval {
+		return
+	}
+	p.capabilitiesProbedAt = now
 	serverVersionNum, extVersion, err := c.getStatStatementsCapabilities(ctx)
 	if err != nil {
 		logger.Debug("failed to probe pg_stat_statements capabilities; toplevel and stats_reset are not used for this scrape", zap.Error(err))
@@ -792,6 +825,7 @@ func (p *postgreSQLScraper) invalidateStatStatementsCapabilities(logger *zap.Log
 	logger.Debug("pg_stat_statements capabilities changed; re-probing on the next scrape", zap.Error(err))
 	p.toplevelSupported = false
 	p.statsResetKnown = false
+	p.capabilitiesProbedAt = time.Time{}
 }
 
 // detectStatsReset reports whether pg_stat_statements_info.stats_reset changed
@@ -812,7 +846,7 @@ func (p *postgreSQLScraper) detectStatsReset(ctx context.Context, c client, logg
 		}
 		// The gap hides whether a reset happened before or after the heuristic saw
 		// it, so do not compare across it.
-		logger.Debug("failed to read pg_stat_statements_info; top_query resets are detected from decreasing counters for this scrape", zap.Error(err))
+		logger.Debug("failed to read pg_stat_statements_info; top_query reset detection falls back to decreasing counters until the next successful read", zap.Error(err))
 		p.statsResetKnown = false
 		return false, statStatementsInfo{}, false
 	}

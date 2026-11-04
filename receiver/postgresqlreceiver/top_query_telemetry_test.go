@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/receiver/receivertest"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata/metricdatatest"
 	"go.uber.org/zap"
@@ -81,10 +82,10 @@ func TestTopQueryCacheTelemetryCountsSeedsAndEvictions(t *testing.T) {
 	}
 
 	// Scrape 1: seed 1, seed 2 (evicts 1). Scrape 2: seed 1 (evicts 2), seed 2 (evicts 1).
-	metadatatest.AssertEqualPostgresqlTopQueryCacheSeeded(t, tel,
-		[]metricdata.DataPoint[int64]{{Value: 4}}, metricdatatest.IgnoreTimestamp())
-	metadatatest.AssertEqualPostgresqlTopQueryCacheEvicted(t, tel,
-		[]metricdata.DataPoint[int64]{{Value: 3}}, metricdatatest.IgnoreTimestamp())
+	metadatatest.AssertEqualPostgresqlTopQueryCacheEvents(t, tel, []metricdata.DataPoint[int64]{
+		{Attributes: attribute.NewSet(attribute.String("outcome", "seeded")), Value: 4},
+		{Attributes: attribute.NewSet(attribute.String("outcome", "evicted")), Value: 3},
+	}, metricdatatest.IgnoreTimestamp())
 
 	entries := observed.FilterMessage("top_query delta cache").AllUntimed()
 	require.Len(t, entries, 2, "one debug log per scrape")
