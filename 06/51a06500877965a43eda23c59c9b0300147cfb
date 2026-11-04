@@ -1,0 +1,43 @@
+receiver/postgresqlreceiver/documentation.md
+  s_f831f252c737d7::t_ba19ccb02dc2ed 762,764,770,772-774
+receiver/postgresqlreceiver/integration_test.go
+  s_f831f252c737d7::t_d211fc9b2dc43d 1216,1319,1338-1347,1393-1397,1399-1403,1405-1416,1432-1436,1440,1448-1452
+receiver/postgresqlreceiver/internal/metadata/generated_metrics.go
+  s_f831f252c737d7::t_85cce5d991e1fe 175-204
+receiver/postgresqlreceiver/internal/metadata/generated_telemetry.go
+  s_f831f252c737d7::t_b8e872e5186265 25-28,60-62
+receiver/postgresqlreceiver/internal/metadatatest/generated_telemetrytest.go
+  s_f831f252c737d7::t_9fb0121fbb0419 24,26-27,35
+receiver/postgresqlreceiver/internal/metadatatest/generated_telemetrytest_test.go
+  s_f831f252c737d7::t_0e56796f6d2468 22-23
+receiver/postgresqlreceiver/metadata.yaml
+  s_f831f252c737d7::t_e23b9099098de6 159-165,819,821,824
+receiver/postgresqlreceiver/scraper.go
+  s_f831f252c737d7::t_e76296a63f6cba 30-31,72-76,163,647-649,781-799,802-804,809-813,828,849
+receiver/postgresqlreceiver/scraper_test.go
+  s_f831f252c737d7::t_da656b506e4c72 1034-1045
+receiver/postgresqlreceiver/templates/topQueryTemplate.tmpl
+  s_f831f252c737d7::t_0be2bc555269ae 2,5,17,19-35,47-49
+receiver/postgresqlreceiver/testdata/scraper/top-query/expectedSql.sql
+  s_f831f252c737d7::t_4ec0c9e562539e 2,4-10,14-16,25
+receiver/postgresqlreceiver/top_query_stats_reset_test.go
+  s_f831f252c737d7::t_637bda713d857f 22,34-37,50-61,87-89,210-213,222,224-225,229-249,295-300,325,331,333-338,430-433
+receiver/postgresqlreceiver/top_query_telemetry_test.go
+  s_f831f252c737d7::t_eabeaea4530fd9 16,85-88
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0651a06500877965a43eda23c59c9b0300147cfb",
+  "prompts": {},
+  "sessions": {
+    "s_f831f252c737d7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1d17d887-0e27-40f9-aede-50f0536246af",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "oded-dd <oded@coralogix.com>"
+    }
+  }
+}
