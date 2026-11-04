@@ -43,3 +43,69 @@ func TestCumulativeDeltaRecoversAfterReset(t *testing.T) {
 	}
 	assert.Equal(t, []float64{0, 10, 5, 4, 11}, emitted)
 }
+
+func TestStatementDelta(t *testing.T) {
+	tests := []struct {
+		name        string
+		prev        statementCounters
+		seen        bool
+		statsReset  bool
+		current     statementCounters
+		wantDeltas  statementCounters
+		wantOutcome deltaOutcome
+	}{
+		{
+			name:        "unseen statement is seeded as a whole",
+			current:     statementCounters{"calls": 1000, "rows": 50},
+			wantDeltas:  statementCounters{"calls": 0, "rows": 0},
+			wantOutcome: deltaSeeded,
+		},
+		{
+			name:        "steady interval reports per-column differences",
+			prev:        statementCounters{"calls": 1000, "rows": 50},
+			seen:        true,
+			current:     statementCounters{"calls": 1010, "rows": 55},
+			wantDeltas:  statementCounters{"calls": 10, "rows": 5},
+			wantOutcome: deltaSteady,
+		},
+		{
+			name:        "any decreased column resets the whole statement",
+			prev:        statementCounters{"calls": 1000, "rows": 50},
+			seen:        true,
+			current:     statementCounters{"calls": 1001, "rows": 2},
+			wantDeltas:  statementCounters{"calls": 1001, "rows": 2},
+			wantOutcome: deltaReset,
+		},
+		{
+			name:        "cached entry missing a column re-seeds the whole statement (no partial deltas)",
+			prev:        statementCounters{"calls": 1000},
+			seen:        true,
+			current:     statementCounters{"calls": 1010, "rows": 55},
+			wantDeltas:  statementCounters{"calls": 0, "rows": 0},
+			wantOutcome: deltaSeeded,
+		},
+		{
+			name:        "stats_reset reports current values even when they grew past the stale cache",
+			prev:        statementCounters{"calls": 1000, "rows": 50},
+			seen:        true,
+			statsReset:  true,
+			current:     statementCounters{"calls": 2000, "rows": 60},
+			wantDeltas:  statementCounters{"calls": 2000, "rows": 60},
+			wantOutcome: deltaReset,
+		},
+		{
+			name:        "stats_reset reports current values for statements not in the cache",
+			statsReset:  true,
+			current:     statementCounters{"calls": 7, "rows": 1},
+			wantDeltas:  statementCounters{"calls": 7, "rows": 1},
+			wantOutcome: deltaReset,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotDeltas, gotOutcome := statementDelta(tt.prev, tt.seen, tt.statsReset, tt.current)
+			assert.Equal(t, tt.wantDeltas, gotDeltas)
+			assert.Equal(t, tt.wantOutcome, gotOutcome)
+		})
+	}
+}

@@ -54,17 +54,17 @@ func TestTopQueryCacheRetainsFetchedStatements(t *testing.T) {
 		ids           []int
 		increment     bool
 		expectedCount int
-		// 10 counter columns are cached per statement; a cold statement is
-		// seeded (not emitted), so the cache must retain every fetched statement
-		// for the next interval's delta to be correct.
+		// One entry is cached per statement; a cold statement is seeded (not
+		// emitted), so the cache must retain every fetched statement for the next
+		// interval's delta to be correct.
 		expectedCacheLen int
 	}{
-		{name: "first scrape seeds without emitting", ids: ids, expectedCacheLen: 5000},
-		{name: "unchanged counters", ids: ids, expectedCacheLen: 5000},
-		{name: "reordered statements", ids: reversed, expectedCacheLen: 5000},
-		{name: "changed statement membership seeds new statements", ids: changed, expectedCacheLen: 7500},
-		{name: "unchanged after membership change", ids: changed, expectedCacheLen: 7500},
-		{name: "one active statement", ids: changed, increment: true, expectedCount: 1, expectedCacheLen: 7500},
+		{name: "first scrape seeds without emitting", ids: ids, expectedCacheLen: 500},
+		{name: "unchanged counters", ids: ids, expectedCacheLen: 500},
+		{name: "reordered statements", ids: reversed, expectedCacheLen: 500},
+		{name: "changed statement membership seeds new statements", ids: changed, expectedCacheLen: 750},
+		{name: "unchanged after membership change", ids: changed, expectedCacheLen: 750},
+		{name: "one active statement", ids: changed, increment: true, expectedCount: 1, expectedCacheLen: 750},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			rows := sqlmock.NewRows(columns)
@@ -98,7 +98,7 @@ func TestTopQueryCacheRetainsFetchedStatements(t *testing.T) {
 			require.NoError(t, scrapeErr)
 			require.NoError(t, mock.ExpectationsWereMet())
 			require.Equal(t, tt.expectedCount, logs.LogRecordCount())
-			require.Equal(t, tt.expectedCacheLen, scraper.cache.Len())
+			require.Equal(t, tt.expectedCacheLen, scraper.cache.len())
 			if tt.increment {
 				attrs := logs.ResourceLogs().At(0).ScopeLogs().At(0).LogRecords().At(0).Attributes().AsRaw()
 				assert.Equal(t, "499", attrs[dbAttributePrefix+queryidColumnName])

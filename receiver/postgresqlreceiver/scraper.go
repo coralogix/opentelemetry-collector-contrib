@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config/confignet"
@@ -59,7 +58,8 @@ type postgreSQLScraper struct {
 	// the map answers membership checks. Read these, not config.ExcludeDatabases.
 	excludedDatabases []string
 	excludes          map[string]struct{}
-	cache             *lru.Cache[string, float64]
+	cache             *topQueryCache
+	telemetry         *metadata.TelemetryBuilder
 	// if enabled, uses a separated attribute for the schema
 	separateSchemaAttr     bool
 	useOTelSemconv         bool
@@ -98,7 +98,7 @@ func newPostgreSQLScraper(
 	settings receiver.Settings,
 	config *Config,
 	clientFactory postgreSQLClientFactory,
-	cache *lru.Cache[string, float64],
+	cache *topQueryCache,
 	queryPlanCache *expirable.LRU[string, string],
 ) (*postgreSQLScraper, error) {
 	excludedDatabases := config.ExcludeDatabases
@@ -127,6 +127,10 @@ func newPostgreSQLScraper(
 		serviceInstanceID = getInstanceID(config.AddrConfig.Endpoint, settings.Logger)
 	}
 	endpoint := newServerEndpoint(config, settings.Logger)
+	telemetryBuilder, err := metadata.NewTelemetryBuilder(settings.TelemetrySettings)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create telemetry builder: %w", err)
+	}
 	mbConfig := metricsBuilderConfigForFeatureGate(config.MetricsBuilderConfig, useOTelSemconv)
 	return &postgreSQLScraper{
 		logger:             settings.Logger,
@@ -137,6 +141,7 @@ func newPostgreSQLScraper(
 		excludedDatabases:  excludedDatabases,
 		excludes:           excludes,
 		cache:              cache,
+		telemetry:          telemetryBuilder,
 		queryPlanCache:     queryPlanCache,
 		separateSchemaAttr: separateSchemaAttr,
 		serviceInstanceID:  serviceInstanceID,
@@ -477,6 +482,8 @@ func (p *postgreSQLScraper) collectTopQuery(ctx context.Context, clientFactory p
 
 	pq := make(priorityqueue.PriorityQueue[map[string]any, float64], 0)
 
+	statsReset := false
+	var seeded, reset int64
 	for i, row := range rows {
 		// The template filters excluded databases server side; this guards the EXPLAIN
 		// connection below in case a row slips through, before the row touches the cache.
@@ -515,20 +522,31 @@ func (p *postgreSQLScraper) collectTopQuery(ctx context.Context, clientFactory p
 		// used here instead of rolname because rolname is empty once the role is
 		// dropped, which would collide two different dropped roles onto one key.
 		// toplevel is not selected, so this key still doesn't distinguish it.
-		cacheKeyPrefix := database + "\x00" + userid + "\x00" + queryID.(string) + "\x00"
+		// One cache entry holds all of the statement's counters, so the statement is
+		// seeded, evicted and reset as a whole.
+		cacheKey := database + "\x00" + userid + "\x00" + queryID.(string)
 
-		for columnName, info := range updatedOnly {
-			var valInAtts float64
+		current := make(statementCounters, len(updatedOnly))
+		for columnName := range updatedOnly {
 			_val := row[dbAttributePrefix+columnName]
 			if i, ok := _val.(int64); ok {
-				valInAtts = float64(i)
+				current[columnName] = float64(i)
 			} else {
-				valInAtts = _val.(float64)
+				current[columnName] = _val.(float64)
 			}
-			cacheKey := cacheKeyPrefix + columnName
-			valInCache, exist := p.cache.Get(cacheKey)
-			finalValue, cacheValue := cumulativeDelta(valInCache, exist, valInAtts)
-			p.cache.Add(cacheKey, cacheValue)
+		}
+		prev, seen := p.cache.get(cacheKey)
+		deltas, outcome := statementDelta(prev, seen, statsReset, current)
+		p.cache.add(cacheKey, current)
+		switch outcome {
+		case deltaSeeded:
+			seeded++
+		case deltaReset:
+			reset++
+		}
+
+		for columnName, info := range updatedOnly {
+			finalValue := deltas[columnName]
 			if info.finalConverter != nil {
 				row[dbAttributePrefix+columnName] = info.finalConverter(finalValue)
 			} else {
@@ -545,6 +563,16 @@ func (p *postgreSQLScraper) collectTopQuery(ctx context.Context, clientFactory p
 		}
 		pq.Push(&item)
 	}
+
+	evicted := p.cache.takeEvictions()
+	p.telemetry.PostgresqlTopQueryCacheSeeded.Add(ctx, seeded)
+	p.telemetry.PostgresqlTopQueryCacheEvicted.Add(ctx, evicted)
+	logger.Debug("top_query delta cache",
+		zap.Int64("seeded", seeded),
+		zap.Int64("evicted", evicted),
+		zap.Int64("reset", reset),
+		zap.Bool("stats_reset_detected", statsReset),
+		zap.Int("cached_statements", p.cache.len()))
 
 	heap.Init(&pq)
 	explained := int64(0)
@@ -652,6 +680,9 @@ func (p *postgreSQLScraper) start(ctx context.Context, host component.Host) erro
 }
 
 func (p *postgreSQLScraper) shutdown(_ context.Context) error {
+	if p.telemetry != nil {
+		p.telemetry.Shutdown()
+	}
 	if p.clientFactory != nil {
 		p.clientFactory.close()
 	}

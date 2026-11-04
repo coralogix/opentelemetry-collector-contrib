@@ -22,7 +22,7 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config/confignet"
 	"go.opentelemetry.io/collector/config/configtls"
-	"go.opentelemetry.io/collector/receiver"
+	"go.opentelemetry.io/collector/receiver/receivertest"
 	"go.opentelemetry.io/collector/scraper/scraperhelper"
 	"go.uber.org/zap"
 
@@ -737,11 +737,9 @@ func TestScrapeLogsFromContainer(t *testing.T) {
 	}
 	clientFactory := newDefaultClientFactory(&cfg)
 
-	ns, err := newPostgreSQLScraper(receiver.Settings{
-		TelemetrySettings: component.TelemetrySettings{
-			Logger: zap.Must(zap.NewProduction()),
-		},
-	}, &cfg, clientFactory, newCache(30*10*2), newTTLCache[string](1000, time.Second))
+	settings := receivertest.NewNopSettings(metadata.Type)
+	settings.Logger = zap.Must(zap.NewProduction())
+	ns, err := newPostgreSQLScraper(settings, &cfg, clientFactory, newCache(30*2), newTTLCache[string](1000, time.Second))
 	assert.NoError(t, err)
 	plogs, err := ns.scrapeQuerySamples(t.Context(), 30)
 	assert.NoError(t, err)
@@ -1265,7 +1263,8 @@ func TestIntegrationTopQueryReset(t *testing.T) {
 	cfg.TopQueryCollection.TopNQuery = 100
 	cfg.TopQueryCollection.MaxExplainEachInterval = 0
 
-	settings := receiver.Settings{TelemetrySettings: component.TelemetrySettings{Logger: zap.Must(zap.NewDevelopment())}}
+	settings := receivertest.NewNopSettings(metadata.Type)
+	settings.Logger = zap.Must(zap.NewDevelopment())
 	newScraper := func() *postgreSQLScraper {
 		t.Helper()
 		s, scraperErr := newTopQueryScraper(settings, cfg, newDefaultClientFactory(cfg))

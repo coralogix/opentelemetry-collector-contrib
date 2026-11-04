@@ -755,6 +755,26 @@ top query
 | service.name | Logical name of the service. When enabled, defaults to unknown_service:postgresql. | Any Str | false | - | - |
 | service.namespace | Logical namespace for the service (for example team or environment). When enabled, defaults to an empty string until set via configuration. | Any Str | false | - | - |
 
+## Internal Telemetry
+
+The following telemetry is emitted by this component.
+
+### otelcol_postgresql.top_query.cache.evicted
+
+Number of statements evicted from the top_query delta cache. An evicted statement is re-seeded on its next scrape and reports a zero delta for that interval.
+
+| Unit | Metric Type | Value Type | Monotonic | Stability |
+| ---- | ----------- | ---------- | --------- | --------- |
+| {statement} | Sum | Int | true | Development |
+
+### otelcol_postgresql.top_query.cache.seeded
+
+Number of statements seeded in the top_query delta cache (not seen before, or evicted) and reported with a zero delta for that interval.
+
+| Unit | Metric Type | Value Type | Monotonic | Stability |
+| ---- | ----------- | ---------- | --------- | --------- |
+| {statement} | Sum | Int | true | Development |
+
 ## Feature Gates
 
 This component has the following feature gates:
