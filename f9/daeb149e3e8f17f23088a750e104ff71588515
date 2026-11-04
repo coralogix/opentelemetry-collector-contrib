@@ -1,0 +1,46 @@
+receiver/postgresqlreceiver/top_query_telemetry_test.go
+  s_f831f252c737d7::t_06b591424fef0b 1-98
+  s_f831f252c737d7::t_f9c32024fdd108 99
+receiver/postgresqlreceiver/delta.go
+  s_f831f252c737d7::t_9f9d1eaffcfdf5 21-84
+receiver/postgresqlreceiver/delta_test.go
+  s_f831f252c737d7::t_149a57e77053a0 46-111
+receiver/postgresqlreceiver/documentation.md
+  s_f831f252c737d7::t_db5e9e2b881033 758-777
+receiver/postgresqlreceiver/factory.go
+  s_f831f252c737d7::t_65aa805a2fd9af 8,25-34,36,40,42-62,201-202,204
+receiver/postgresqlreceiver/integration_test.go
+  s_f831f252c737d7::t_86749a49f5f6e6 25,740-742,1266-1267
+receiver/postgresqlreceiver/internal/metadata/generated_telemetry.go
+  s_f831f252c737d7::t_0a32b32c2e8775 1-74
+receiver/postgresqlreceiver/internal/metadata/generated_telemetry_test.go
+  s_f831f252c737d7::t_6f3717d389b88f 1-73
+receiver/postgresqlreceiver/internal/metadatatest/generated_telemetrytest.go
+  s_f831f252c737d7::t_8927dd05c9a059 1-54
+receiver/postgresqlreceiver/internal/metadatatest/generated_telemetrytest_test.go
+  s_f831f252c737d7::t_77fc603b2e87f2 1-32
+receiver/postgresqlreceiver/metadata.yaml
+  s_f831f252c737d7::t_0d8bab25aa5673 810-828
+receiver/postgresqlreceiver/scraper.go
+  s_f831f252c737d7::t_45c2bbca05cfaf 61-62,101,130-133,144,485-486,525-527,529-530,533,535,537-549,567-576,683-685
+receiver/postgresqlreceiver/scraper_test.go
+  s_f831f252c737d7::t_9314e8fb0bdc80 733,739,741,791,837,890,1050,1085,1160,1216,1278,1327,1358,1428,1465,1470-1482,1517-1521,1539,1822,1930
+receiver/postgresqlreceiver/top_query_cache_test.go
+  s_f831f252c737d7::t_2e516b83da6551 57-59,62-67,101
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f9daeb149e3e8f17f23088a750e104ff71588515",
+  "prompts": {},
+  "sessions": {
+    "s_f831f252c737d7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1d17d887-0e27-40f9-aede-50f0536246af",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "oded-dd <oded@coralogix.com>"
+    }
+  }
+}
