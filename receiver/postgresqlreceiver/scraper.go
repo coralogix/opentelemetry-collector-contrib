@@ -65,7 +65,10 @@ type postgreSQLScraper struct {
 	statStatementsInfo statStatementsInfoState
 	lastStatsReset     time.Time
 	lastDealloc        int64
-	telemetry          *metadata.TelemetryBuilder
+	// toplevelSupported is set once pg_stat_statements_info has been read: both it
+	// and the toplevel column arrived in pg_stat_statements 1.9 (PostgreSQL 14).
+	toplevelSupported bool
+	telemetry         *metadata.TelemetryBuilder
 	// if enabled, uses a separated attribute for the schema
 	separateSchemaAttr     bool
 	useOTelSemconv         bool
@@ -475,7 +478,7 @@ func (p *postgreSQLScraper) collectTopQuery(ctx context.Context, clientFactory p
 	// lifetime totals.
 	statsReset := p.detectStatsReset(ctx, defaultDbClient, logger)
 
-	rows, err := defaultDbClient.getTopQuery(ctx, limit, p.excludedDatabases, logger)
+	rows, err := defaultDbClient.getTopQuery(ctx, limit, p.excludedDatabases, p.toplevelSupported, logger)
 	if err != nil {
 		logger.Error("failed to get top query", zap.Error(err))
 		mux.addPartial(err)
@@ -543,10 +546,15 @@ func (p *postgreSQLScraper) collectTopQuery(ctx context.Context, clientFactory p
 		// pg_stat_statements is keyed on (userid, dbid, queryid, toplevel). userid is
 		// used here instead of rolname because rolname is empty once the role is
 		// dropped, which would collide two different dropped roles onto one key.
-		// toplevel is not selected, so this key still doesn't distinguish it.
+		// On PostgreSQL 14+ toplevel is selected and appended: with
+		// pg_stat_statements.track = 'all' the top-level and nested entries of one
+		// statement have independent counters and must not share a cache entry.
 		// One cache entry holds all of the statement's counters, so the statement is
 		// seeded, evicted and reset as a whole.
 		cacheKey := database + "\x00" + userid + "\x00" + queryID.(string)
+		if toplevel, ok := row[dbAttributePrefix+"toplevel"].(string); ok {
+			cacheKey += "\x00" + toplevel
+		}
 
 		current := make(statementCounters, len(updatedOnly))
 		for columnName := range updatedOnly {
@@ -730,6 +738,7 @@ func (p *postgreSQLScraper) detectStatsReset(ctx context.Context, c client, logg
 	info, err := c.getStatStatementsInfo(ctx)
 	if err != nil {
 		if isUndefinedTable(err) {
+			p.toplevelSupported = false
 			logger.Debug("pg_stat_statements_info is not available (PostgreSQL < 14 or pg_stat_statements < 1.9); top_query resets are detected from decreasing counters only", zap.Error(err))
 			p.statStatementsInfo = statStatementsInfoUnsupported
 			return false
@@ -739,6 +748,8 @@ func (p *postgreSQLScraper) detectStatsReset(ctx context.Context, c client, logg
 		return false
 	}
 
+	// pg_stat_statements_info and pg_stat_statements.toplevel both arrived in 1.9.
+	p.toplevelSupported = true
 	reset := false
 	if p.statStatementsInfo == statStatementsInfoKnown {
 		reset = info.statsReset.Valid && !info.statsReset.Time.Equal(p.lastStatsReset)

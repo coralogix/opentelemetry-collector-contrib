@@ -5,6 +5,7 @@ package postgresqlreceiver
 
 import (
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -48,7 +49,7 @@ func newStatsResetTestScraper(t *testing.T) (*postgreSQLScraper, sqlmock.Sqlmock
 // scrapeTargetCalls runs one top_query scrape and returns the emitted calls deltas.
 func scrapeTargetCalls(t *testing.T, scraper *postgreSQLScraper, mock sqlmock.Sqlmock, value string) []int64 {
 	t.Helper()
-	mock.ExpectQuery("LIMIT 3").WillReturnRows(sqlmock.NewRows(topQueryColumns).AddRow(topQueryRow("42", "10", value)...))
+	mock.ExpectQuery("LIMIT 3").WillReturnRows(sqlmock.NewRows(topQueryColumns).AddRow(topQueryRow("42", value)...))
 	logs, err := scraper.scrapeTopQuery(t.Context(), 3, 3, 0, 0)
 	require.NoError(t, err)
 	require.NoError(t, mock.ExpectationsWereMet())
@@ -106,6 +107,7 @@ func TestTopQueryStatsResetFallsBackWithoutStatStatementsInfo(t *testing.T) {
 	mock.ExpectQuery(statStatementsInfoPattern).WillReturnError(&pq.Error{Code: "42P01", Message: `relation "pg_stat_statements_info" does not exist`})
 	assert.Empty(t, scrapeTargetCalls(t, scraper, mock, "1000"))
 	assert.Equal(t, statStatementsInfoUnsupported, scraper.statStatementsInfo)
+	assert.False(t, scraper.toplevelSupported, "PostgreSQL < 14 has no toplevel column")
 
 	// No further pg_stat_statements_info query is expected from here on.
 	assert.Equal(t, []int64{10}, scrapeTargetCalls(t, scraper, mock, "1010"))
@@ -126,4 +128,44 @@ func TestTopQueryStatsResetTransientErrorKeepsTrying(t *testing.T) {
 
 	expectStatStatementsInfo(mock, 0, t1)
 	assert.Equal(t, []int64{10}, scrapeTargetCalls(t, scraper, mock, "1010"))
+}
+
+// TestTopQueryCacheKeysOnToplevel covers pg_stat_statements.track = 'all' on
+// PostgreSQL 14+: the same (userid, dbid, queryid) has a top-level and a nested
+// entry with independent counters. They must not share a cache entry, or each
+// would look like a reset of the other on every scrape.
+func TestTopQueryCacheKeysOnToplevel(t *testing.T) {
+	scraper, mock, observed := newStatsResetTestScraper(t)
+	t1 := time.Date(2026, 11, 4, 10, 0, 0, 0, time.UTC)
+	columns := append(append([]string{}, topQueryColumns...), "toplevel")
+
+	scrapeCalls := func(topCalls, nestedCalls string) []int64 {
+		t.Helper()
+		expectStatStatementsInfo(mock, 0, t1)
+		mock.ExpectQuery("LIMIT 3").WillReturnRows(sqlmock.NewRows(columns).
+			AddRow(append(topQueryRow("42", topCalls), "true")...).
+			AddRow(append(topQueryRow("42", nestedCalls), "false")...))
+		logs, err := scraper.scrapeTopQuery(t.Context(), 3, 3, 0, 0)
+		require.NoError(t, err)
+		require.NoError(t, mock.ExpectationsWereMet())
+		var calls []int64
+		for _, rl := range logs.ResourceLogs().All() {
+			for _, sl := range rl.ScopeLogs().All() {
+				for _, lr := range sl.LogRecords().All() {
+					calls = append(calls, lr.Attributes().AsRaw()[dbAttributePrefix+callsColumnName].(int64))
+				}
+			}
+		}
+		slices.Sort(calls)
+		return calls
+	}
+
+	assert.Empty(t, scrapeCalls("1000", "50"), "both entries are seeded on the first scrape")
+	assert.Equal(t, []int64{5, 10}, scrapeCalls("1010", "55"), "top-level and nested entries keep independent deltas")
+	assert.Equal(t, []int64{1, 2}, scrapeCalls("1012", "56"))
+
+	for _, entry := range observed.FilterMessage("top_query delta cache").AllUntimed() {
+		assert.Equal(t, int64(0), entry.ContextMap()["reset"], "top-level and nested entries must not reset each other")
+	}
+	assert.True(t, scraper.toplevelSupported, "pg_stat_statements_info implies pg_stat_statements 1.9+, which has toplevel")
 }

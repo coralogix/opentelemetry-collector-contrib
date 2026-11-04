@@ -23,13 +23,13 @@ import (
 	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/postgresqlreceiver/internal/metadatatest"
 )
 
-// topQueryRow builds one pg_stat_statements row where every counter column holds value.
-func topQueryRow(queryID, userid, value string) []driver.Value {
+// topQueryRow builds one pg_stat_statements row (userid 10) where every counter column holds value.
+func topQueryRow(queryID, value string) []driver.Value {
 	values := map[string]driver.Value{
 		"datname":         "postgres",
 		"query":           "SELECT 1",
 		queryidColumnName: queryID,
-		"userid":          userid,
+		"userid":          "10",
 		"rolname":         "otel",
 	}
 	row := make([]driver.Value, len(topQueryColumns))
@@ -72,8 +72,8 @@ func TestTopQueryCacheTelemetryCountsSeedsAndEvictions(t *testing.T) {
 
 	for scrape, value := range []string{"100", "200"} {
 		mock.ExpectQuery("LIMIT 2").WillReturnRows(sqlmock.NewRows(topQueryColumns).
-			AddRow(topQueryRow("1", "10", value)...).
-			AddRow(topQueryRow("2", "10", value)...))
+			AddRow(topQueryRow("1", value)...).
+			AddRow(topQueryRow("2", value)...))
 		logs, scrapeErr := scraper.scrapeTopQuery(t.Context(), 2, 2, 0, 0)
 		require.NoError(t, scrapeErr)
 		require.NoError(t, mock.ExpectationsWereMet())

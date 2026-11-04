@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1210,7 +1211,18 @@ func TestIntegrationTopQueryReset(t *testing.T) {
 	t.Run("post14", func(t *testing.T) { testTopQueryReset(t, post17TestVersion, true) })
 }
 
-func testTopQueryReset(t *testing.T, pgVersion string, hasStatStatementsInfo bool) {
+// topQueryHarness is a PostgreSQL container with pg_stat_statements plus
+// helpers to drive the top_query scraper against it.
+type topQueryHarness struct {
+	workload    *sql.DB
+	observed    *observer.ObservedLogs
+	runWorkload func(n int)
+	newScraper  func() *postgreSQLScraper
+	targetCalls func(s *postgreSQLScraper) []int64
+}
+
+func startTopQueryHarness(t *testing.T, pgVersion string, extraArgs ...string) *topQueryHarness {
+	t.Helper()
 	ci, err := testcontainers.GenericContainer(
 		t.Context(),
 		testcontainers.GenericContainerRequest{
@@ -1234,7 +1246,7 @@ func testTopQueryReset(t *testing.T, pgVersion string, hasStatStatementsInfo boo
 					},
 				},
 				ExposedPorts: []string{postgresqlPort},
-				Cmd:          []string{"-c", "shared_preload_libraries=pg_stat_statements"},
+				Cmd:          append([]string{"-c", "shared_preload_libraries=pg_stat_statements"}, extraArgs...),
 				// See tableCountEquivalenceTest: the second readiness line is the real server.
 				WaitingFor: wait.ForLog("database system is ready to accept connections").
 					WithOccurrence(2).
@@ -1243,14 +1255,14 @@ func testTopQueryReset(t *testing.T, pgVersion string, hasStatStatementsInfo boo
 		},
 	)
 	require.NoError(t, err)
-	defer testcontainers.CleanupContainer(t, ci)
+	testcontainers.CleanupContainer(t, ci)
 	require.NoError(t, ci.Start(t.Context()))
 
 	p, err := ci.MappedPort(t.Context(), postgresqlPort)
 	require.NoError(t, err)
 	workload, err := sql.Open("postgres", fmt.Sprintf("postgres://root:otel@localhost:%s/otel2?sslmode=disable", p.Port()))
 	require.NoError(t, err)
-	defer workload.Close()
+	t.Cleanup(func() { workload.Close() })
 
 	runWorkload := func(n int) {
 		t.Helper()
@@ -1303,6 +1315,19 @@ func testTopQueryReset(t *testing.T, pgVersion string, hasStatStatementsInfo boo
 		return calls
 	}
 
+	return &topQueryHarness{
+		workload:    workload,
+		observed:    observed,
+		runWorkload: runWorkload,
+		newScraper:  newScraper,
+		targetCalls: targetCalls,
+	}
+}
+
+func testTopQueryReset(t *testing.T, pgVersion string, hasStatStatementsInfo bool) {
+	h := startTopQueryHarness(t, pgVersion)
+	workload, observed, runWorkload, newScraper, targetCalls := h.workload, h.observed, h.runWorkload, h.newScraper, h.targetCalls
+
 	resetStatements := func() {
 		t.Helper()
 		_, resetErr := workload.ExecContext(t.Context(), "SELECT pg_stat_statements_reset()")
@@ -1350,4 +1375,50 @@ func testTopQueryReset(t *testing.T, pgVersion string, hasStatStatementsInfo boo
 	assert.Empty(t, targetCalls(restarted), "a restarted collector must seed, not emit the lifetime total")
 	runWorkload(7)
 	assert.Equal(t, []int64{7}, targetCalls(restarted))
+}
+
+// TestIntegrationTopQueryResetToplevel runs with pg_stat_statements.track = 'all':
+// the workload statement then has a top-level and a nested entry with the same
+// (userid, dbid, queryid). They must keep independent deltas instead of
+// resetting each other on every scrape.
+func TestIntegrationTopQueryResetToplevel(t *testing.T) {
+	h := startTopQueryHarness(t, post17TestVersion, "-c", "pg_stat_statements.track=all")
+	_, err := h.workload.ExecContext(t.Context(), `CREATE FUNCTION run_target() RETURNS void LANGUAGE plpgsql AS $$
+BEGIN
+  PERFORM * FROM test2 WHERE id = 67;
+END $$`)
+	require.NoError(t, err)
+	runNested := func(n int) {
+		t.Helper()
+		for range n {
+			_, execErr := h.workload.ExecContext(t.Context(), "SELECT run_target()")
+			require.NoError(t, execErr)
+		}
+	}
+
+	h.runWorkload(100)
+	runNested(40)
+
+	// Fixture precondition: the nested execution shares the top-level entry's queryid.
+	var entries int
+	require.NoError(t, h.workload.QueryRowContext(t.Context(), `SELECT count(DISTINCT toplevel) FROM pg_stat_statements
+WHERE queryid = (SELECT queryid FROM pg_stat_statements WHERE query = 'SELECT * FROM test2 WHERE id = $1' AND toplevel LIMIT 1)`).Scan(&entries))
+	require.Equal(t, 2, entries, "fixture must produce a top-level and a nested entry for one queryid")
+
+	scraper := h.newScraper()
+	assert.Empty(t, h.targetCalls(scraper), "first scrape seeds both entries")
+	h.runWorkload(10)
+	runNested(3)
+	calls := h.targetCalls(scraper)
+	slices.Sort(calls)
+	assert.Equal(t, []int64{3, 10}, calls, "top-level and nested entries keep independent deltas")
+	h.runWorkload(2)
+	runNested(1)
+	calls = h.targetCalls(scraper)
+	slices.Sort(calls)
+	assert.Equal(t, []int64{1, 2}, calls)
+
+	for _, entry := range h.observed.FilterMessage("top_query delta cache").AllUntimed() {
+		assert.Equal(t, int64(0), entry.ContextMap()["reset"], "top-level and nested entries must not reset each other")
+	}
 }

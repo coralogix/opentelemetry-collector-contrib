@@ -999,6 +999,7 @@ func TestTopQueryTemplateRendering(t *testing.T) {
 	tests := []struct {
 		name           string
 		excludes       []string
+		toplevel       bool
 		expectedClause string
 	}{
 		{
@@ -1010,6 +1011,12 @@ func TestTopQueryTemplateRendering(t *testing.T) {
 			excludes:       []string{"rdsadmin", "azure_maintenance"},
 			expectedClause: "AND datname NOT IN ('rdsadmin','azure_maintenance')",
 		},
+		{
+			// pg_stat_statements 1.9+ (PostgreSQL 14+) keys entries on toplevel too.
+			name:           "toplevel is selected when supported",
+			toplevel:       true,
+			expectedClause: "total_plan_time,\n  toplevel::TEXT\nFROM",
+		},
 	}
 
 	for _, tc := range tests {
@@ -1018,11 +1025,16 @@ func TestTopQueryTemplateRendering(t *testing.T) {
 			err := tmpl.Execute(&buf, map[string]any{
 				"limit":             int64(10),
 				"excludedDatabases": quoteDatabaseList(tc.excludes),
+				"toplevel":          tc.toplevel,
 			})
 			require.NoError(t, err)
 
 			rendered := buf.String()
 			assert.Contains(t, rendered, "LIMIT 10;")
+			if !tc.toplevel {
+				assert.NotContains(t, rendered, "toplevel", "PostgreSQL < 14 has no toplevel column")
+				assert.Contains(t, rendered, "total_plan_time\nFROM")
+			}
 
 			if tc.expectedClause == "" {
 				assert.NotContains(t, rendered, "datname NOT IN (", "no database filter should be emitted without excludes")
@@ -2363,7 +2375,7 @@ func (*mockClient) getStatStatementsInfo(context.Context) (statStatementsInfo, e
 	return statStatementsInfo{}, nil
 }
 
-func (*mockClient) getTopQuery(context.Context, int64, []string, *zap.Logger) ([]map[string]any, error) {
+func (*mockClient) getTopQuery(context.Context, int64, []string, bool, *zap.Logger) ([]map[string]any, error) {
 	panic("unimplemented")
 }
 
