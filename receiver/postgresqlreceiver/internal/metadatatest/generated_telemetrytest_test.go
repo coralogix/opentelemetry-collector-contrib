@@ -19,8 +19,12 @@ func TestSetupTelemetry(t *testing.T) {
 	tb, err := metadata.NewTelemetryBuilder(testTel.NewTelemetrySettings())
 	require.NoError(t, err)
 	defer tb.Shutdown()
+	tb.PostgresqlTopQueryCacheDuplicated.Add(context.Background(), 1)
 	tb.PostgresqlTopQueryCacheEvicted.Add(context.Background(), 1)
 	tb.PostgresqlTopQueryCacheSeeded.Add(context.Background(), 1)
+	AssertEqualPostgresqlTopQueryCacheDuplicated(t, testTel,
+		[]metricdata.DataPoint[int64]{{Value: 1}},
+		metricdatatest.IgnoreTimestamp())
 	AssertEqualPostgresqlTopQueryCacheEvicted(t, testTel,
 		[]metricdata.DataPoint[int64]{{Value: 1}},
 		metricdatatest.IgnoreTimestamp())

@@ -82,6 +82,7 @@ type client interface {
 	// toplevel selects pg_stat_statements.toplevel (pg_stat_statements 1.9+, PostgreSQL 14+).
 	getTopQuery(ctx context.Context, limit int64, excludedDatabases []string, toplevel bool, logger *zap.Logger) ([]map[string]any, error)
 	getStatStatementsInfo(ctx context.Context) (statStatementsInfo, error)
+	getStatStatementsCapabilities(ctx context.Context) (serverVersionNum int64, extVersion string, err error)
 	explainQuery(ctx context.Context, query, queryID string, logger *zap.Logger) (string, error)
 }
 
@@ -1690,6 +1691,44 @@ func (c *postgreSQLClient) getStatStatementsInfo(ctx context.Context) (statState
 		return statStatementsInfo{}, err
 	}
 	return info, nil
+}
+
+const statStatementsCapabilitiesQuery = "/* otel-collector-ignore */ SELECT current_setting('server_version_num')::bigint AS server_version_num, " +
+	"COALESCE((SELECT extversion FROM pg_extension WHERE extname = 'pg_stat_statements'), '') AS extversion;"
+
+// getStatStatementsCapabilities returns server_version_num and the installed
+// pg_stat_statements extension version ("" when not installed in this database).
+func (c *postgreSQLClient) getStatStatementsCapabilities(ctx context.Context) (int64, string, error) {
+	var serverVersionNum int64
+	var extVersion string
+	if err := c.client.QueryRowContext(ctx, statStatementsCapabilitiesQuery).Scan(&serverVersionNum, &extVersion); err != nil {
+		return 0, "", err
+	}
+	return serverVersionNum, extVersion, nil
+}
+
+// extVersionAtLeast reports whether an extension version such as "1.10" is at
+// least major.minor.
+func extVersionAtLeast(version string, major, minor int) bool {
+	parts := strings.SplitN(version, ".", 3)
+	if len(parts) < 2 {
+		return false
+	}
+	gotMajor, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return false
+	}
+	gotMinor, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return false
+	}
+	return gotMajor > major || (gotMajor == major && gotMinor >= minor)
+}
+
+// isUndefinedColumn reports whether err is PostgreSQL's undefined_column (42703).
+func isUndefinedColumn(err error) bool {
+	var pqErr *pq.Error
+	return errors.As(err, &pqErr) && pqErr.Code == "42703"
 }
 
 // isUndefinedTable reports whether err is PostgreSQL's undefined_table (42P01).

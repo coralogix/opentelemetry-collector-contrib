@@ -27,7 +27,10 @@ import (
 // evictions so the scraper can report them, because an evicted statement is
 // silently re-seeded (reported as 0) on its next scrape.
 type topQueryCache struct {
-	entries   *lru.Cache[string, statementCounters]
+	entries *lru.Cache[string, statementCounters]
+	// evictions is written by the LRU eviction callback and drained once per
+	// scrape. Scrapes are sequential today; the atomic keeps the counter correct
+	// if the cache is ever read concurrently, at negligible cost.
 	evictions atomic.Int64
 }
 

@@ -21,6 +21,22 @@ func NewSettings(tt *componenttest.Telemetry) receiver.Settings {
 	return set
 }
 
+func AssertEqualPostgresqlTopQueryCacheDuplicated(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...metricdatatest.Option) {
+	want := metricdata.Metrics{
+		Name:        "otelcol_postgresql.top_query.cache.duplicated",
+		Description: "Number of top_query rows whose delta cache key already appeared in the same scrape. The duplicate is reported with a zero delta instead of being compared against the other row. [Development]",
+		Unit:        "{statement}",
+		Data: metricdata.Sum[int64]{
+			Temporality: metricdata.CumulativeTemporality,
+			IsMonotonic: true,
+			DataPoints:  dps,
+		},
+	}
+	got, err := tt.GetMetric("otelcol_postgresql.top_query.cache.duplicated")
+	require.NoError(t, err)
+	metricdatatest.AssertEqual(t, want, got, opts...)
+}
+
 func AssertEqualPostgresqlTopQueryCacheEvicted(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...metricdatatest.Option) {
 	want := metricdata.Metrics{
 		Name:        "otelcol_postgresql.top_query.cache.evicted",

@@ -809,6 +809,14 @@ metrics:
 
 telemetry:
   metrics:
+    postgresql.top_query.cache.duplicated:
+      enabled: true
+      description: Number of top_query rows whose delta cache key already appeared in the same scrape. The duplicate is reported with a zero delta instead of being compared against the other row.
+      stability: development
+      unit: "{statement}"
+      sum:
+        value_type: int
+        monotonic: true
     postgresql.top_query.cache.evicted:
       enabled: true
       description: Number of statements evicted from the top_query delta cache. An evicted statement is re-seeded on its next scrape and reports a zero delta for that interval.

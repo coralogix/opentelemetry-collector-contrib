@@ -2371,6 +2371,10 @@ func (*mockClient) explainQuery(context.Context, string, string, *zap.Logger) (s
 }
 
 // getTopQuery implements client.
+func (*mockClient) getStatStatementsCapabilities(context.Context) (int64, string, error) {
+	return 0, "", nil
+}
+
 func (*mockClient) getStatStatementsInfo(context.Context) (statStatementsInfo, error) {
 	return statStatementsInfo{}, nil
 }

@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"net"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1379,8 +1378,9 @@ func testTopQueryReset(t *testing.T, pgVersion string, hasStatStatementsInfo boo
 
 // TestIntegrationTopQueryResetToplevel runs with pg_stat_statements.track = 'all':
 // the workload statement then has a top-level and a nested entry with the same
-// (userid, dbid, queryid). They must keep independent deltas instead of
-// resetting each other on every scrape.
+// (userid, dbid, queryid). They must keep independent cache entries instead of
+// resetting each other on every scrape, and are emitted as one record whose
+// deltas are their sum.
 func TestIntegrationTopQueryResetToplevel(t *testing.T) {
 	h := startTopQueryHarness(t, post17TestVersion, "-c", "pg_stat_statements.track=all")
 	_, err := h.workload.ExecContext(t.Context(), `CREATE FUNCTION run_target() RETURNS void LANGUAGE plpgsql AS $$
@@ -1409,14 +1409,10 @@ WHERE queryid = (SELECT queryid FROM pg_stat_statements WHERE query = 'SELECT * 
 	assert.Empty(t, h.targetCalls(scraper), "first scrape seeds both entries")
 	h.runWorkload(10)
 	runNested(3)
-	calls := h.targetCalls(scraper)
-	slices.Sort(calls)
-	assert.Equal(t, []int64{3, 10}, calls, "top-level and nested entries keep independent deltas")
+	assert.Equal(t, []int64{13}, h.targetCalls(scraper), "one record per statement: 10 top-level + 3 nested calls")
 	h.runWorkload(2)
 	runNested(1)
-	calls = h.targetCalls(scraper)
-	slices.Sort(calls)
-	assert.Equal(t, []int64{1, 2}, calls)
+	assert.Equal(t, []int64{3}, h.targetCalls(scraper))
 
 	for _, entry := range h.observed.FilterMessage("top_query delta cache").AllUntimed() {
 		assert.Equal(t, int64(0), entry.ContextMap()["reset"], "top-level and nested entries must not reset each other")

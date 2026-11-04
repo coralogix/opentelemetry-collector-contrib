@@ -759,6 +759,14 @@ top query
 
 The following telemetry is emitted by this component.
 
+### otelcol_postgresql.top_query.cache.duplicated
+
+Number of top_query rows whose delta cache key already appeared in the same scrape. The duplicate is reported with a zero delta instead of being compared against the other row.
+
+| Unit | Metric Type | Value Type | Monotonic | Stability |
+| ---- | ----------- | ---------- | --------- | --------- |
+| {statement} | Sum | Int | true | Development |
+
 ### otelcol_postgresql.top_query.cache.evicted
 
 Number of statements evicted from the top_query delta cache. An evicted statement is re-seeded on its next scrape and reports a zero delta for that interval.
