@@ -527,15 +527,8 @@ func (p *postgreSQLScraper) collectTopQuery(ctx context.Context, clientFactory p
 			}
 			cacheKey := cacheKeyPrefix + columnName
 			valInCache, exist := p.cache.Get(cacheKey)
-			valDelta := valInAtts
-			if exist {
-				valDelta = valInAtts - valInCache
-			}
-			finalValue := float64(0)
-			if valDelta > 0 {
-				p.cache.Add(cacheKey, valInAtts)
-				finalValue = valDelta
-			}
+			finalValue, cacheValue := cumulativeDelta(valInCache, exist, valInAtts)
+			p.cache.Add(cacheKey, cacheValue)
 			if info.finalConverter != nil {
 				row[dbAttributePrefix+columnName] = info.finalConverter(finalValue)
 			} else {

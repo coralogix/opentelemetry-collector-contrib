@@ -726,6 +726,21 @@ var querySampleColumns = []string{
 
 // newSQLMockRows builds a one-row sqlmock result in the given column order,
 // filling any column missing from values with an empty string.
+// primeTopQueryCache marks a statement's counters as already seen (at 0) so the
+// next scrape reports a steady-state interval delta. A cold cache now seeds and
+// reports nothing on the first scrape, so tests asserting emitted records must
+// prime the cache first.
+func primeTopQueryCache(scraper *postgreSQLScraper, database, userid, queryid string) {
+	prefix := database + "\x00" + userid + "\x00" + queryid + "\x00"
+	for _, column := range []string{
+		totalExecTimeColumnName, totalPlanTimeColumnName, rowsColumnName, callsColumnName,
+		sharedBlksDirtiedColumnName, sharedBlksHitColumnName, sharedBlksReadColumnName,
+		sharedBlksWrittenColumnName, tempBlksReadColumnName, tempBlksWrittenColumnName,
+	} {
+		scraper.cache.Add(prefix+column, 0)
+	}
+}
+
 func newSQLMockRows(columns []string, values map[string]any) *sqlmock.Rows {
 	rowValues := make([]driver.Value, len(columns))
 	for i, col := range columns {
@@ -1539,6 +1554,7 @@ func TestScrapeTopQueriesDbServerQueryPlanEvent(t *testing.T) {
 
 	t.Run("disabled keeps the plan on db.server.top_query", func(t *testing.T) {
 		scraper, mock := newScraper(t, true, false)
+		primeTopQueryCache(scraper, "postgres", "16415", "114514")
 
 		mock.ExpectQuery(expectedScrapeTopQuery).WillReturnRows(newSQLMockRows(topQueryColumns, map[string]any{
 			callsColumnName:             "123",
@@ -1575,6 +1591,7 @@ func TestScrapeTopQueriesDbServerQueryPlanEvent(t *testing.T) {
 
 	t.Run("enabled moves the plan to db.server.query_plan", func(t *testing.T) {
 		scraper, mock := newScraper(t, true, true)
+		primeTopQueryCache(scraper, "postgres", "16415", "114514")
 
 		mock.ExpectQuery(expectedScrapeTopQuery).WillReturnRows(newSQLMockRows(topQueryColumns, map[string]any{
 			callsColumnName:             "123",
@@ -1631,6 +1648,7 @@ func TestScrapeTopQueriesDbServerQueryPlanEvent(t *testing.T) {
 
 	t.Run("enabled without db.server.top_query collects nothing", func(t *testing.T) {
 		scraper, mock := newScraper(t, false, true)
+		primeTopQueryCache(scraper, "postgres", "16415", "114514")
 
 		mock.ExpectQuery(expectedScrapeTopQuery).WillReturnRows(newSQLMockRows(topQueryColumns, map[string]any{
 			callsColumnName:             "123",
@@ -1663,6 +1681,8 @@ func TestScrapeTopQueriesDbServerQueryPlanEvent(t *testing.T) {
 	// Two roles running the same statement in the same database share (queryid, db.namespace).
 	t.Run("two roles sharing a queryid get distinct db.server.query_plan records", func(t *testing.T) {
 		scraper, mock := newScraper(t, true, true)
+		primeTopQueryCache(scraper, "postgres", "16415", "114514")
+		primeTopQueryCache(scraper, "postgres", "16416", "114514")
 
 		rows := sqlmock.NewRows(topQueryColumns).
 			AddRow("100", "postgres", "1111", "1112", "1113", "1114", "1115", "1116",
@@ -1715,6 +1735,8 @@ func TestScrapeTopQueriesDbServerQueryPlanEvent(t *testing.T) {
 	// tells them apart.
 	t.Run("two dropped roles sharing a queryid stay distinct via userid", func(t *testing.T) {
 		scraper, mock := newScraper(t, true, true)
+		primeTopQueryCache(scraper, "postgres", "16415", "114514")
+		primeTopQueryCache(scraper, "postgres", "16416", "114514")
 
 		rows := sqlmock.NewRows(topQueryColumns).
 			AddRow("100", "postgres", "1111", "1112", "1113", "1114", "1115", "1116",
@@ -1758,6 +1780,7 @@ func TestScrapeTopQueriesDbServerQueryPlanEvent(t *testing.T) {
 
 	t.Run("no plan available yields db.server.top_query only", func(t *testing.T) {
 		scraper, mock := newScraper(t, true, true)
+		primeTopQueryCache(scraper, "postgres", "16415", "114514")
 
 		// A non-explainable query (GRANT is not in the EXPLAIN whitelist) so
 		// explainQuery short-circuits to ("", nil) without issuing EXPLAIN.
