@@ -25,6 +25,8 @@ import (
 	"go.opentelemetry.io/collector/receiver/receivertest"
 	"go.opentelemetry.io/collector/scraper/scraperhelper"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/common/testutil"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal/scraperinttest"
@@ -1270,8 +1272,9 @@ func testTopQueryReset(t *testing.T, pgVersion string, hasStatStatementsInfo boo
 	cfg.TopQueryCollection.TopNQuery = 100
 	cfg.TopQueryCollection.MaxExplainEachInterval = 0
 
+	core, observed := observer.New(zapcore.DebugLevel)
 	settings := receivertest.NewNopSettings(metadata.Type)
-	settings.Logger = zap.Must(zap.NewDevelopment())
+	settings.Logger = zap.New(core)
 	newScraper := func() *postgreSQLScraper {
 		t.Helper()
 		s, scraperErr := newTopQueryScraper(settings, cfg, newDefaultClientFactory(cfg))
@@ -1315,12 +1318,20 @@ func testTopQueryReset(t *testing.T, pgVersion string, hasStatStatementsInfo boo
 	// Reset, then the counter grows past the stale cached value (1010) within one interval.
 	resetStatements()
 	runWorkload(1020)
+	calls := targetCalls(scraper)
+	cacheLogs := observed.FilterMessage("top_query delta cache").AllUntimed()
+	require.NotEmpty(t, cacheLogs)
+	assert.Equal(t, hasStatStatementsInfo, cacheLogs[len(cacheLogs)-1].ContextMap()["stats_reset_detected"],
+		"stats_reset detection must be used exactly when pg_stat_statements_info exists")
+	require.Len(t, calls, 1)
 	if hasStatStatementsInfo {
-		assert.Equal(t, []int64{1020}, targetCalls(scraper),
+		assert.Equal(t, int64(1020), calls[0],
 			"a changed pg_stat_statements_info.stats_reset must report the full post-reset count")
 	} else {
-		// Known limitation without pg_stat_statements_info: only current - stale is visible.
-		assert.Equal(t, []int64{10}, targetCalls(scraper))
+		// Without pg_stat_statements_info the reset is only visible if some counter
+		// (e.g. total_exec_time) fell below its stale value; otherwise only
+		// current - stale (10) is reported. This undercount is a known limitation.
+		assert.Contains(t, []int64{10, 1020}, calls[0])
 	}
 	runWorkload(3)
 	assert.Equal(t, []int64{3}, targetCalls(scraper))
