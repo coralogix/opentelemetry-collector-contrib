@@ -5,6 +5,7 @@ package postgresqlreceiver
 
 import (
 	"database/sql/driver"
+	"errors"
 	"strconv"
 	"testing"
 	"time"
@@ -350,4 +351,28 @@ func TestTopQueryTemporalityEmptyIsDelta(t *testing.T) {
 	cfg.Username, cfg.Password = "otel", "otel"
 	cfg.TopQueryCollection.Temporality = ""
 	require.NoError(t, confmap.Validate(cfg), "an unset temporality means delta")
+}
+
+// TestTopQueryCumulativeFailedReprobeKeepsToplevel: a failed stats_since
+// re-probe keeps the cached toplevel result; start_time still comes from
+// stats_reset.
+func TestTopQueryCumulativeFailedReprobeKeepsToplevel(t *testing.T) {
+	s := newTopQueryTestScraper(t, cumulative)
+	s.expectCapabilities(170002, "1.10")
+	s.expectInfo(0, t1)
+	s.expectRows(topQueryToplevelRowsPattern, []string{"42", "1000", "true"})
+	s.scrape(t, 0)
+	require.True(t, s.toplevelSupported)
+
+	s.advance(10 * time.Minute)
+	s.mock.ExpectQuery(statStatementsCapsPattern).WillReturnError(errors.New("canceling statement due to statement timeout"))
+	s.expectInfo(0, t1)
+	s.expectRows(topQueryToplevelRowsPattern, []string{"42", "1010", "true"})
+	records := topQueryRecords(s.scrape(t, 0))
+	require.Len(t, records, 1)
+	assert.True(t, s.toplevelSupported, "a failed re-probe keeps the cached toplevel result")
+	assert.False(t, s.statsSinceSupported)
+	assert.Equal(t, true, records[0][attrToplevel])
+	assert.Equal(t, t1.Format(time.RFC3339Nano), records[0][attrStartTime], "start_time still comes from stats_reset")
+	assert.Equal(t, 1, s.probeFailures())
 }
