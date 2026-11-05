@@ -200,6 +200,12 @@ separately. This could lead some resources usage and limit this will reduce the 
 This defines the cache's size for query plan.
 - `query_plan_cache_ttl`: (optional, default=1h). How long before the query plan cache got expired. Example values: `1m`, `1h`. 
 - `collection_interval`: (optional, default=60s). This receiver can collect top_query metrics on an interval. If not provided then the global collection_interval takes effect. This value must be a string readable by Golang's [time.ParseDuration](https://pkg.go.dev/time#ParseDuration). Valid time units are `ns`, `us` (or `µs`), `ms`, `s`, `m`, `h`.
+- `temporality`: (optional, default=`delta`). How `db.server.top_query` reports the statement counters.
+  - `delta`: per-interval deltas computed by the receiver, for the `top_n_query` statements with the most execution time in the interval.
+  - `cumulative`: the raw `pg_stat_statements` counters of every fetched statement (up to `max_rows_per_query`), so the next consumer computes deltas and keeps the top statements. Records are still ordered by execution time in the interval, and plans are attached to the first `top_n_query` only. Each record also carries:
+    - `postgresql.aggregation_temporality`: `cumulative`;
+    - `postgresql.start_time`: when the counters started, RFC 3339 UTC: the entry's `stats_since` (pg_stat_statements 1.11+, PostgreSQL 17+), else `pg_stat_statements_info.stats_reset` (pg_stat_statements 1.9+, PostgreSQL 14+); absent on older versions;
+    - `postgresql.toplevel` (bool, pg_stat_statements 1.9+): top-level and nested entries (`pg_stat_statements.track = 'all'`) are separate records instead of being summed.
 
 #### `db.server.query_plan`
 

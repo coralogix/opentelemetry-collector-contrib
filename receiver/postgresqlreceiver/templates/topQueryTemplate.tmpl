@@ -16,6 +16,9 @@ SELECT
   total_exec_time,
   total_plan_time,
   toplevel::TEXT
+{{- if .statsSince }},
+  (EXTRACT(EPOCH FROM stats_since) * 1000000)::BIGINT::TEXT AS stats_since
+{{- end }}
 {{- else }}
   SUM(calls) AS calls,
   datname,

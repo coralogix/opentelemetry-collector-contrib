@@ -39,9 +39,15 @@ $defs:
       query_plan_cache_ttl:
         type: string
         format: duration
+      temporality:
+        description: 'Temporality selects how db.server.top_query reports statement counters: "delta" (default) reports per-interval deltas computed in the receiver; "cumulative" reports the raw pg_stat_statements counters of every fetched statement with postgresql.start_time and postgresql.toplevel, so a downstream consumer computes the deltas.'
+        $ref: top_query_temporality
       top_n_query:
         type: integer
         x-customType: int64
+  top_query_temporality:
+    description: TopQueryTemporality is the aggregation temporality of top_query counters.
+    type: string
 type: object
 properties:
   connect_database:

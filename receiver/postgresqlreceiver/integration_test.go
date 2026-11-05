@@ -1213,6 +1213,8 @@ func TestIntegrationTopQueryReset(t *testing.T) {
 // topQueryHarness is a PostgreSQL container with pg_stat_statements plus
 // helpers to drive the top_query scraper against it.
 type topQueryHarness struct {
+	// cfg is read by newScraper, so a test may change it before creating a scraper.
+	cfg         *Config
 	port        string
 	workload    *sql.DB
 	observed    *observer.ObservedLogs
@@ -1316,6 +1318,7 @@ func startTopQueryHarness(t *testing.T, pgVersion string, extraArgs ...string) *
 	}
 
 	return &topQueryHarness{
+		cfg:         cfg,
 		port:        p.Port(),
 		workload:    workload,
 		observed:    observed,

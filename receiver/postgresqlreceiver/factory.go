@@ -110,6 +110,7 @@ func createDefaultConfig() component.Config {
 			MaxExplainEachInterval: 1000,
 			QueryPlanCacheSize:     1000,
 			QueryPlanCacheTTL:      time.Hour,
+			Temporality:            TopQueryTemporalityDelta,
 		},
 	}
 }
