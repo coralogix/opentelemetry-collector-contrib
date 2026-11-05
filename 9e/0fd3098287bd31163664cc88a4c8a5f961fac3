@@ -1,0 +1,21 @@
+.chloggen/postgresqlreceiver-top-query-candidate-order.yaml
+  s_f831f252c737d7::t_4c1e42d3582ed8 1-22
+receiver/postgresqlreceiver/README.md
+  s_f831f252c737d7::t_b0b173dd88f883 195
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9e0fd3098287bd31163664cc88a4c8a5f961fac3",
+  "prompts": {},
+  "sessions": {
+    "s_f831f252c737d7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1d17d887-0e27-40f9-aede-50f0536246af",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "oded-dd <oded@coralogix.com>"
+    }
+  }
+}
