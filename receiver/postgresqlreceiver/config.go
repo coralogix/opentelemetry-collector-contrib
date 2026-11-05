@@ -152,7 +152,7 @@ func (cfg *Config) Validate() error {
 	}
 
 	switch cfg.TopQueryCollection.Temporality {
-	case TopQueryTemporalityDelta, TopQueryTemporalityCumulative:
+	case "", TopQueryTemporalityDelta, TopQueryTemporalityCumulative: // "" = delta
 	default:
 		err = multierr.Append(err, fmt.Errorf("invalid config: 'top_query_collection.temporality' must be %q or %q, got %q",
 			TopQueryTemporalityDelta, TopQueryTemporalityCumulative, cfg.TopQueryCollection.Temporality))

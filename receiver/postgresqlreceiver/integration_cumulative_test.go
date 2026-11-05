@@ -112,6 +112,31 @@ END $$`)
 	require.NoError(t, err, "start_time must be set on PostgreSQL 14+")
 	assert.WithinDuration(t, time.Now(), start1, 10*time.Minute)
 
+	// A statement first run after the last stats_reset: with stats_since
+	// (pg_stat_statements 1.11) its start_time is its own creation, later than
+	// stats_reset; with the 1.10 fallback it is stats_reset itself.
+	var statsReset time.Time
+	require.NoError(t, connectDB.QueryRowContext(t.Context(), "SELECT stats_reset FROM pg_stat_statements_info").Scan(&statsReset))
+	time.Sleep(20 * time.Millisecond)
+	_, err = h.workload.ExecContext(t.Context(), "SELECT count(*) FROM test2")
+	require.NoError(t, err)
+	newStart := ""
+	logs, err := scraper.scrapeTopQuery(t.Context(), h.cfg.TopQueryCollection.MaxRowsPerQuery, h.cfg.TopQueryCollection.TopNQuery, 0, 0)
+	require.NoError(t, err)
+	for _, lr := range recordsByEvent(logs, "db.server.top_query") {
+		a := lr.Attributes().AsRaw()
+		if q, _ := a["db.query.text"].(string); a["db.namespace"] == "otel2" && strings.HasPrefix(strings.ToLower(q), "select count ( * ) from test2") {
+			newStart, _ = a["postgresql.start_time"].(string)
+		}
+	}
+	newStartTime, err := time.Parse(time.RFC3339Nano, newStart)
+	require.NoError(t, err, "the new statement is emitted with a start_time")
+	if extVersion == "" {
+		assert.True(t, newStartTime.After(statsReset), "stats_since must be used: %s should be after stats_reset %s", newStartTime, statsReset)
+	} else {
+		assert.True(t, newStartTime.Equal(statsReset), "pg_stat_statements 1.10 falls back to stats_reset: %s vs %s", newStartTime, statsReset)
+	}
+
 	h.runWorkload(10)
 	got = byToplevel(targets())
 	assert.Equal(t, int64(110), got[true].calls, "cumulative, not the delta")

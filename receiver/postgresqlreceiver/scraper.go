@@ -657,7 +657,11 @@ func (p *postgreSQLScraper) collectTopQuery(ctx context.Context, clientFactory p
 		priority, _ := row[dbAttributePrefix+totalExecTimeColumnName].(float64)
 		if cumulative {
 			// Every fetched candidate is emitted; the downstream consumer does the top-K cut.
-			priority = row[deltaTotalExecTimeKey].(float64)
+			if delta, ok := row[deltaTotalExecTimeKey].(float64); ok {
+				priority = delta
+			} else {
+				priority = 0
+			}
 		} else if priority == 0.0 {
 			continue
 		}
@@ -829,8 +833,14 @@ const capabilityReprobeInterval = 10 * time.Minute
 // A positive result is cached. A negative or failed probe is repeated at most
 // every capabilityReprobeInterval, so an extension created or updated after
 // start is picked up without a restart; an invalidation forces the next probe.
+//
+// stats_since is only used in cumulative mode. There, a cached toplevel result
+// without stats_since (pg_stat_statements < 1.11) is re-probed on the same
+// cadence, so ALTER EXTENSION ... UPDATE is picked up without a restart; a
+// failed re-probe keeps the cached toplevel result.
 func (p *postgreSQLScraper) refreshStatStatementsCapabilities(ctx context.Context, c client, logger *zap.Logger) {
-	if p.toplevelSupported {
+	cumulative := p.config.TopQueryCollection.Temporality == TopQueryTemporalityCumulative
+	if p.toplevelSupported && (p.statsSinceSupported || !cumulative) {
 		return
 	}
 	now := p.now()
@@ -1806,10 +1816,14 @@ func cumulativeExtraFor(row map[string]any, statsInfo statStatementsInfo, statsI
 // applyCumulativeExtras adds the cumulative-mode attributes to the emitted
 // db.server.top_query records. The records are emitted in recording order, so
 // they pair with cumulativeExtras by position.
+//
+// In cumulative mode every record carries the aggregation temporality marker,
+// even when the extras cannot be paired with the records: raw counters must
+// never be emitted without it. Only start_time and toplevel are then skipped.
 func (p *postgreSQLScraper) applyCumulativeExtras(logs plog.Logs) {
 	extras := p.cumulativeExtras
 	p.cumulativeExtras = nil
-	if len(extras) == 0 {
+	if p.config.TopQueryCollection.Temporality != TopQueryTemporalityCumulative {
 		return
 	}
 	var records []plog.LogRecord
@@ -1822,14 +1836,17 @@ func (p *postgreSQLScraper) applyCumulativeExtras(logs plog.Logs) {
 			}
 		}
 	}
-	if len(records) != len(extras) {
-		p.logger.Error("top_query cumulative attributes do not match the emitted records; not adding them",
+	paired := len(records) == len(extras)
+	if !paired {
+		p.logger.Error("top_query cumulative attributes do not match the emitted records; not adding start_time and toplevel",
 			zap.Int("records", len(records)), zap.Int("extras", len(extras)))
-		return
 	}
 	for i, lr := range records {
 		attrs := lr.Attributes()
 		attrs.PutStr(aggregationTemporalityAttr, string(TopQueryTemporalityCumulative))
+		if !paired {
+			continue
+		}
 		if extras[i].startTime != "" {
 			attrs.PutStr(startTimeAttr, extras[i].startTime)
 		}

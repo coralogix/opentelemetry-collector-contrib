@@ -243,19 +243,111 @@ func TestTopQueryCumulativeDuplicateKeyEmitsOnce(t *testing.T) {
 
 // TestTopQueryCumulativeKeepsQueryTextObfuscated: the cumulative path emits
 // the same obfuscated text as delta mode and never the raw statement (raw
-// text is opt-in P5 / EC-04, behind the credential rule of BR-1).
+// text is opt-in P5 / EC-04, behind the credential rule of BR-1). The PG BR-1
+// credential forms are covered too: pg_stat_statements keeps utility
+// statements with their literals.
 func TestTopQueryCumulativeKeepsQueryTextObfuscated(t *testing.T) {
+	const secret = "synthetic-literal-1"
+	cases := map[string]string{
+		"select literal":            "SELECT * FROM users WHERE token = '" + secret + "'",
+		"alter role cleartext":      "ALTER ROLE app_user PASSWORD '" + secret + "'",
+		"alter role md5":            "ALTER ROLE app_user PASSWORD 'md5" + secret + "'",
+		"alter role scram":          "ALTER ROLE app_user PASSWORD 'SCRAM-SHA-256$4096:c2FsdA==$" + secret + ":c2VydmVy'",
+		"create user with password": "CREATE USER app_user WITH PASSWORD '" + secret + "'",
+		"user mapping":              "CREATE USER MAPPING FOR app_user SERVER remote OPTIONS (user 'app', password '" + secret + "')",
+		"subscription connection":   "CREATE SUBSCRIPTION sub CONNECTION 'host=db.example dbname=app user=rep password=" + secret + "' PUBLICATION pub",
+		"dollar quoted":             "ALTER ROLE app_user PASSWORD $$" + secret + "$$",
+		"dollar quoted tag":         "ALTER ROLE app_user PASSWORD $pw$" + secret + "$pw$",
+	}
+	for name, query := range cases {
+		t.Run(name, func(t *testing.T) {
+			s := newTopQueryTestScraper(t, cumulative)
+			s.expectCapabilities(170002, "1.10")
+			s.expectInfo(0, t1)
+			s.expectCumulativeRows(topQueryToplevelRowsPattern,
+				cumulativeRow{queryID: "42", value: "1000", toplevel: "true", query: query})
+			records := topQueryRecords(s.scrape(t, 0))
+			require.Len(t, records, 1)
+			assert.NotContains(t, records[0], dbAttributePrefix+"raw_query")
+			for key, v := range records[0] {
+				if str, ok := v.(string); ok {
+					assert.NotContains(t, str, secret, "literal leaked in %s", key)
+				}
+			}
+		})
+	}
+}
+
+// TestTopQueryCumulativeMarkerSurvivesExtrasMismatch: if the per-record
+// attributes cannot be paired with the emitted records, every record still
+// carries the cumulative marker (raw counters are never emitted unmarked);
+// only start_time and toplevel are skipped.
+func TestTopQueryCumulativeMarkerSurvivesExtrasMismatch(t *testing.T) {
 	s := newTopQueryTestScraper(t, cumulative)
 	s.expectCapabilities(170002, "1.10")
 	s.expectInfo(0, t1)
-	s.expectCumulativeRows(topQueryToplevelRowsPattern,
-		cumulativeRow{queryID: "42", value: "1000", toplevel: "true", query: "SELECT * FROM users WHERE token = 'synthetic-literal-1'"})
+	s.expectRows(topQueryToplevelRowsPattern, []string{"1", "100", "true"}, []string{"2", "200", "true"})
+	// A stale entry forces a records/extras count mismatch.
+	s.cumulativeExtras = []cumulativeExtra{{startTime: "stale", toplevel: true, hasToplevel: true}}
+	records := topQueryRecords(s.scrape(t, 0))
+	require.Len(t, records, 2)
+	for _, r := range records {
+		assert.Equal(t, "cumulative", r[attrAggregationTemporality])
+		assert.NotContains(t, r, attrStartTime)
+		assert.NotContains(t, r, attrToplevel)
+	}
+	assert.Equal(t, 1, s.observed.FilterMessageSnippet("do not match the emitted records").Len())
+}
+
+// TestTopQueryCumulativeReprobesStatsSince: with toplevel cached as supported
+// but stats_since not (pg_stat_statements < 1.11), cumulative mode re-probes
+// at most every 10 minutes, so ALTER EXTENSION ... UPDATE is picked up
+// without a collector restart.
+func TestTopQueryCumulativeReprobesStatsSince(t *testing.T) {
+	s := newTopQueryTestScraper(t, cumulative)
+	s.expectCapabilities(170002, "1.10")
+	s.expectInfo(0, t1)
+	s.expectRows(topQueryToplevelRowsPattern, []string{"42", "1000", "true"})
+	s.scrape(t, 0)
+	assert.False(t, s.statsSinceSupported)
+
+	s.advance(time.Minute)
+	s.expectInfo(0, t1)
+	s.expectRows(topQueryToplevelRowsPattern, []string{"42", "1010", "true"})
+	s.scrape(t, 0) // no probe within 10 minutes (sqlmock rejects an unexpected one)
+
+	s.advance(10 * time.Minute)
+	since := time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC)
+	s.expectCapabilities(170002, "1.11")
+	s.expectInfo(0, t1)
+	s.expectCumulativeRows(topQueryStatsSinceRowsPattern,
+		cumulativeRow{queryID: "42", value: "1020", toplevel: "true", since: strconv.FormatInt(since.UnixMicro(), 10)})
 	records := topQueryRecords(s.scrape(t, 0))
 	require.Len(t, records, 1)
-	assert.Equal(t, "SELECT * FROM users WHERE token = ?", records[0]["db.query.text"])
-	for key, v := range records[0] {
-		if str, ok := v.(string); ok {
-			assert.NotContains(t, str, "synthetic-literal-1", "literal leaked in %s", key)
-		}
-	}
+	assert.True(t, s.statsSinceSupported)
+	assert.True(t, s.toplevelSupported)
+	assert.Equal(t, since.Format(time.RFC3339Nano), records[0][attrStartTime])
+	assert.Zero(t, s.probeFailures())
+}
+
+// TestTopQueryDeltaModeDoesNotReprobeStatsSince: stats_since is only used in
+// cumulative mode, so delta mode keeps the cached positive result.
+func TestTopQueryDeltaModeDoesNotReprobeStatsSince(t *testing.T) {
+	s := newTopQueryTestScraper(t)
+	s.expectCapabilities(170002, "1.10")
+	s.expectInfo(0, t1)
+	s.expectRows(topQueryToplevelRowsPattern, []string{"42", "1000", "true"})
+	s.scrape(t, 0)
+	s.advance(11 * time.Minute)
+	s.expectInfo(0, t1)
+	s.expectRows(topQueryToplevelRowsPattern, []string{"42", "1010", "true"})
+	s.scrape(t, 0)
+	assert.Zero(t, s.probeFailures())
+}
+
+func TestTopQueryTemporalityEmptyIsDelta(t *testing.T) {
+	cfg := createDefaultConfig().(*Config)
+	cfg.Username, cfg.Password = "otel", "otel"
+	cfg.TopQueryCollection.Temporality = ""
+	require.NoError(t, confmap.Validate(cfg), "an unset temporality means delta")
 }
