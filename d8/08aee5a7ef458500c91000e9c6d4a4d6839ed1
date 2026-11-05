@@ -1,0 +1,29 @@
+receiver/postgresqlreceiver/client.go
+  s_f831f252c737d7::t_26e678d86f6289 83-84,1742,1744,1746-1747
+receiver/postgresqlreceiver/config.go
+  s_f831f252c737d7::t_63d720b2e594a5 65-66,69
+receiver/postgresqlreceiver/integration_candidate_order_test.go
+  s_f831f252c737d7::t_d5e171e60ea930 20-25,28-29
+receiver/postgresqlreceiver/scraper.go
+  s_f831f252c737d7::t_515ea4d6a52273 481
+receiver/postgresqlreceiver/scraper_test.go
+  s_f831f252c737d7::t_e6b69c1663745d 2392
+receiver/postgresqlreceiver/top_query_candidate_order_test.go
+  s_f831f252c737d7::t_ba63ad98ba0ee5 16,78-109
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d808aee5a7ef458500c91000e9c6d4a4d6839ed1",
+  "prompts": {},
+  "sessions": {
+    "s_f831f252c737d7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1d17d887-0e27-40f9-aede-50f0536246af",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "oded-dd <oded@coralogix.com>"
+    }
+  }
+}
