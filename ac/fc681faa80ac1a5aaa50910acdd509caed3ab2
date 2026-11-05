@@ -1,0 +1,19 @@
+receiver/postgresqlreceiver/top_query_cumulative_test.go
+  s_f831f252c737d7::t_4b2432292d2392 8,355-378
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "acfc681faa80ac1a5aaa50910acdd509caed3ab2",
+  "prompts": {},
+  "sessions": {
+    "s_f831f252c737d7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1d17d887-0e27-40f9-aede-50f0536246af",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "oded-dd <oded@coralogix.com>"
+    }
+  }
+}
