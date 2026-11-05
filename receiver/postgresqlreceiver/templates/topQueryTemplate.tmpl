@@ -50,5 +50,5 @@ WHERE
 {{- if not .toplevel }}
 GROUP BY pg_stat_statements.userid, pg_stat_statements.dbid, pg_stat_statements.queryid, datname, rolname
 {{- end }}
-ORDER BY calls DESC
+ORDER BY {{ .orderBy }} DESC
 LIMIT {{ .limit }};

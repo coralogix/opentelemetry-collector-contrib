@@ -192,6 +192,7 @@ CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 The following options are available:
 - `max_rows_per_query`: (optional, default=1000) The max number of rows would return from the query 
 against `pg_stat_statements`.
+- `candidate_order`: (optional, default=`calls`). Which `max_rows_per_query` statements are fetched from `pg_stat_statements`: `calls` takes the most executed statements, `total_time` the statements with the most total execution time (`total_exec_time`), so a rarely run but slow statement is not missed.
 - `top_n_query`: (optional, default=200) The maximum number of active queries to report (to the next consumer) in a single run.
 - `max_explain_each_interval`: (optional, default=1000). The maximum number of explain query to be sent in each scrape interval. The top query 
 collection would not get the query plan directly. Instead, we need to mimic the query in the database and get the query plan from database 

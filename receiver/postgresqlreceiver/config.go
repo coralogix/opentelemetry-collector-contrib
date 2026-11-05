@@ -38,12 +38,17 @@ const (
 var errQueryPlanWithoutTopQuery = errors.New("`db.server.query_plan` requires `db.server.top_query` to be enabled")
 
 type TopQueryCollection struct {
-	MaxRowsPerQuery        int64         `mapstructure:"max_rows_per_query"`
-	TopNQuery              int64         `mapstructure:"top_n_query"`
-	MaxExplainEachInterval int64         `mapstructure:"max_explain_each_interval"`
-	QueryPlanCacheSize     int           `mapstructure:"query_plan_cache_size"`
-	QueryPlanCacheTTL      time.Duration `mapstructure:"query_plan_cache_ttl"`
-	CollectionInterval     time.Duration `mapstructure:"collection_interval"`
+	MaxRowsPerQuery int64 `mapstructure:"max_rows_per_query"`
+	// CandidateOrder selects which max_rows_per_query statements are fetched
+	// from pg_stat_statements: "calls" (default) takes the most executed ones,
+	// "total_time" the ones with the most total execution time, so a rare slow
+	// statement is not missed.
+	CandidateOrder         TopQueryCandidateOrder `mapstructure:"candidate_order"`
+	TopNQuery              int64                  `mapstructure:"top_n_query"`
+	MaxExplainEachInterval int64                  `mapstructure:"max_explain_each_interval"`
+	QueryPlanCacheSize     int                    `mapstructure:"query_plan_cache_size"`
+	QueryPlanCacheTTL      time.Duration          `mapstructure:"query_plan_cache_ttl"`
+	CollectionInterval     time.Duration          `mapstructure:"collection_interval"`
 	// Temporality selects how db.server.top_query reports statement counters:
 	// "delta" (default) reports per-interval deltas computed in the receiver;
 	// "cumulative" reports the raw pg_stat_statements counters of every fetched
@@ -61,6 +66,28 @@ const (
 	TopQueryTemporalityDelta      TopQueryTemporality = "delta"
 	TopQueryTemporalityCumulative TopQueryTemporality = "cumulative"
 )
+
+// TopQueryCandidateOrder is the pg_stat_statements order of the top_query candidates.
+type TopQueryCandidateOrder string
+
+const (
+	TopQueryCandidateOrderCalls     TopQueryCandidateOrder = "calls"
+	TopQueryCandidateOrderTotalTime TopQueryCandidateOrder = "total_time"
+)
+
+// column is the pg_stat_statements column to order by; "" for an invalid value.
+// An unset order means calls. The template only ever receives one of these
+// fixed names.
+func (o TopQueryCandidateOrder) column() string {
+	switch o {
+	case "", TopQueryCandidateOrderCalls:
+		return "calls"
+	case TopQueryCandidateOrderTotalTime:
+		return "total_exec_time"
+	default:
+		return ""
+	}
+}
 
 type QuerySampleCollection struct {
 	MaxRowsPerQuery int64 `mapstructure:"max_rows_per_query"`
@@ -145,6 +172,11 @@ func (cfg *Config) Validate() error {
 		}
 	default:
 		err = multierr.Append(err, errors.New(ErrTransportsSupported))
+	}
+
+	if cfg.TopQueryCollection.CandidateOrder.column() == "" {
+		err = multierr.Append(err, fmt.Errorf("invalid config: 'top_query_collection.candidate_order' must be %q or %q, got %q",
+			TopQueryCandidateOrderCalls, TopQueryCandidateOrderTotalTime, cfg.TopQueryCollection.CandidateOrder))
 	}
 
 	if cfg.LogsBuilderConfig.Events.DbServerQueryPlan.Enabled && !cfg.LogsBuilderConfig.Events.DbServerTopQuery.Enabled {

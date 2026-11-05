@@ -22,9 +22,15 @@ $defs:
       max_rows_per_query:
         type: integer
         x-customType: int64
+  top_query_candidate_order:
+    description: TopQueryCandidateOrder is the pg_stat_statements order of the top_query candidates.
+    type: string
   top_query_collection:
     type: object
     properties:
+      candidate_order:
+        description: 'CandidateOrder selects which max_rows_per_query statements are fetched from pg_stat_statements: "calls" (default) takes the most executed ones, "total_time" the ones with the most total execution time, so a rare slow statement is not missed.'
+        $ref: top_query_candidate_order
       collection_interval:
         type: string
         format: duration
