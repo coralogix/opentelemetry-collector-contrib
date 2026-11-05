@@ -1035,6 +1035,7 @@ func TestTopQueryTemplateRendering(t *testing.T) {
 				"excludedDatabases": quoteDatabaseList(tc.excludes),
 				"toplevel":          tc.toplevel,
 				"statsSince":        tc.statsSince,
+				"orderBy":           "calls",
 			})
 			require.NoError(t, err)
 
@@ -2397,7 +2398,7 @@ func (*mockClient) getStatStatementsInfo(context.Context) (statStatementsInfo, e
 	return statStatementsInfo{}, nil
 }
 
-func (*mockClient) getTopQuery(context.Context, int64, []string, bool, bool, *zap.Logger) ([]map[string]any, error) {
+func (*mockClient) getTopQuery(context.Context, int64, []string, bool, bool, string, *zap.Logger) ([]map[string]any, error) {
 	panic("unimplemented")
 }
 
