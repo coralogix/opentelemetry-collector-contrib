@@ -54,13 +54,17 @@ func TestTopQueryCacheRetainsFetchedStatements(t *testing.T) {
 		ids           []int
 		increment     bool
 		expectedCount int
+		// One entry is cached per statement; a cold statement is seeded (not
+		// emitted), so the cache must retain every fetched statement for the next
+		// interval's delta to be correct.
+		expectedCacheLen int
 	}{
-		{name: "first scrape", ids: ids, expectedCount: 50},
-		{name: "unchanged counters", ids: ids},
-		{name: "reordered statements", ids: reversed},
-		{name: "changed statement membership", ids: changed, expectedCount: 50},
-		{name: "unchanged after membership change", ids: changed},
-		{name: "one active statement", ids: changed, increment: true, expectedCount: 1},
+		{name: "first scrape seeds without emitting", ids: ids, expectedCacheLen: 500},
+		{name: "unchanged counters", ids: ids, expectedCacheLen: 500},
+		{name: "reordered statements", ids: reversed, expectedCacheLen: 500},
+		{name: "changed statement membership seeds new statements", ids: changed, expectedCacheLen: 750},
+		{name: "unchanged after membership change", ids: changed, expectedCacheLen: 750},
+		{name: "one active statement", ids: changed, increment: true, expectedCount: 1, expectedCacheLen: 750},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			rows := sqlmock.NewRows(columns)
@@ -94,6 +98,7 @@ func TestTopQueryCacheRetainsFetchedStatements(t *testing.T) {
 			require.NoError(t, scrapeErr)
 			require.NoError(t, mock.ExpectationsWereMet())
 			require.Equal(t, tt.expectedCount, logs.LogRecordCount())
+			require.Equal(t, tt.expectedCacheLen, scraper.cache.len())
 			if tt.increment {
 				attrs := logs.ResourceLogs().At(0).ScopeLogs().At(0).LogRecords().At(0).Attributes().AsRaw()
 				assert.Equal(t, "499", attrs[dbAttributePrefix+queryidColumnName])
@@ -129,8 +134,7 @@ func TestTopQueryCacheSeparatesDatabaseAndRole(t *testing.T) {
 	scraper, err := newTopQueryScraper(receivertest.NewNopSettings(metadata.Type), cfg, mockSimpleClientFactory{db: db})
 	require.NoError(t, err)
 
-	rows := sqlmock.NewRows(columns)
-	for _, identity := range []struct {
+	identities := []struct {
 		database string
 		role     string
 		userid   string
@@ -140,31 +144,51 @@ func TestTopQueryCacheSeparatesDatabaseAndRole(t *testing.T) {
 		{database: "db_a", role: "app", userid: "101"},
 		{database: "db_b", role: "app", userid: "101"},
 		{database: "db_a", role: "reporting", userid: "102"},
-	} {
-		values := map[string]driver.Value{
-			"datname":         identity.database,
-			"query":           "SELECT count(*) FROM pg_class",
-			queryidColumnName: "42",
-			"userid":          identity.userid,
-			"rolname":         identity.role,
-		}
-		for _, column := range columns {
-			if _, exists := values[column]; !exists {
-				values[column] = "10000"
+	}
+	buildRows := func(increments []int) *sqlmock.Rows {
+		rows := sqlmock.NewRows(columns)
+		for i, identity := range identities {
+			values := map[string]driver.Value{
+				"datname":         identity.database,
+				"query":           "SELECT count(*) FROM pg_class",
+				queryidColumnName: "42",
+				"userid":          identity.userid,
+				"rolname":         identity.role,
 			}
+			for _, column := range columns {
+				if _, exists := values[column]; !exists {
+					values[column] = fmt.Sprint(10000 + increments[i])
+				}
+			}
+			row := make([]driver.Value, len(columns))
+			for j, column := range columns {
+				row[j] = values[column]
+			}
+			rows.AddRow(row...)
 		}
-		row := make([]driver.Value, len(columns))
-		for i, column := range columns {
-			row[i] = values[column]
-		}
-		rows.AddRow(row...)
+		return rows
 	}
 
-	mock.ExpectQuery("LIMIT 3").WillReturnRows(rows)
+	// First scrape seeds every identity's counters without emitting.
+	mock.ExpectQuery("LIMIT 3").WillReturnRows(buildRows([]int{0, 0, 0}))
 	logs, err := scraper.scrapeTopQuery(t.Context(), cfg.TopQueryCollection.MaxRowsPerQuery, cfg.TopQueryCollection.TopNQuery, cfg.TopQueryCollection.MaxExplainEachInterval, 0)
 	require.NoError(t, err)
 	require.NoError(t, mock.ExpectationsWereMet())
+	require.Equal(t, 0, logs.LogRecordCount())
+
+	// Second scrape: each identity advances by a different amount, so a shared
+	// cache key would produce a wrong delta for at least one of them.
+	mock.ExpectQuery("LIMIT 3").WillReturnRows(buildRows([]int{1, 2, 3}))
+	logs, err = scraper.scrapeTopQuery(t.Context(), cfg.TopQueryCollection.MaxRowsPerQuery, cfg.TopQueryCollection.TopNQuery, cfg.TopQueryCollection.MaxExplainEachInterval, 0)
+	require.NoError(t, err)
+	require.NoError(t, mock.ExpectationsWereMet())
 	require.Equal(t, 3, logs.LogRecordCount())
+	gotCalls := make(map[[2]string]int64, len(identities))
+	for _, lr := range logs.ResourceLogs().At(0).ScopeLogs().At(0).LogRecords().All() {
+		attrs := lr.Attributes().AsRaw()
+		gotCalls[[2]string{attrs["db.namespace"].(string), attrs[dbAttributePrefix+"rolname"].(string)}] = attrs[dbAttributePrefix+callsColumnName].(int64)
+	}
+	assert.Equal(t, map[[2]string]int64{{"db_a", "app"}: 1, {"db_b", "app"}: 2, {"db_a", "reporting"}: 3}, gotCalls)
 	mock.ExpectClose()
 }
 
@@ -277,6 +301,11 @@ func TestTopQueryPlanCacheSeparatesDatabaseAndRole(t *testing.T) {
 		expectedPlans[[2]string{statement.database, statement.role}] = statement.plan
 	}
 
+	// Prime the counter cache so the first scrape below is a steady-state interval.
+	for _, statement := range statements {
+		primeTopQueryCache(scraper, statement.database, statement.userid, "42")
+	}
+
 	for scrape, name := range []string{"first scrape", "reordered active statements reuse cached plans"} {
 		t.Run(name, func(t *testing.T) {
 			factory.requestedDatabases = nil
@@ -379,6 +408,10 @@ func TestTopQueryPlanCacheSeparatesDroppedRoles(t *testing.T) {
 		expectedPlans[statement.userid] = statement.plan
 	}
 
+	for _, statement := range statements {
+		primeTopQueryCache(scraper, "postgres", statement.userid, "42")
+	}
+
 	rows := sqlmock.NewRows(topQueryColumns)
 	for i, statement := range statements {
 		values := map[string]driver.Value{
@@ -433,5 +466,76 @@ func TestTopQueryPlanCacheSeparatesDroppedRoles(t *testing.T) {
 			}
 		}
 	}
+	mock.ExpectClose()
+}
+
+// TestTopQueryDeltaColdStartAndReset guards the top_query delta semantics:
+// a cold cache must not emit lifetime totals (restart spike), and a counter
+// that decreases after pg_stat_statements_reset() must be treated as a reset
+// rather than reporting 0 until it climbs past the stale cached value (blackout).
+func TestTopQueryDeltaColdStartAndReset(t *testing.T) {
+	cfg := createDefaultConfig().(*Config)
+	cfg.LogsBuilderConfig.Events.DbServerTopQuery.Enabled = true
+	cfg.TopQueryCollection.MaxRowsPerQuery = 3
+	cfg.TopQueryCollection.TopNQuery = 3
+	cfg.TopQueryCollection.MaxExplainEachInterval = 0
+
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, db.Close()) })
+
+	newScraper := func() *postgreSQLScraper {
+		s, scraperErr := newTopQueryScraper(receivertest.NewNopSettings(metadata.Type), cfg, mockSimpleClientFactory{db: db})
+		require.NoError(t, scraperErr)
+		return s
+	}
+
+	buildRows := func(calls, totalExecTime string) *sqlmock.Rows {
+		values := map[string]driver.Value{
+			"datname":               "postgres",
+			"query":                 "SELECT count(*) FROM pg_class",
+			queryidColumnName:       "42",
+			"userid":                "10",
+			"rolname":               "otel",
+			callsColumnName:         calls,
+			totalExecTimeColumnName: totalExecTime,
+		}
+		row := make([]driver.Value, len(topQueryColumns))
+		for i, column := range topQueryColumns {
+			if value, exists := values[column]; exists {
+				row[i] = value
+			} else {
+				row[i] = "0"
+			}
+		}
+		return sqlmock.NewRows(topQueryColumns).AddRow(row...)
+	}
+
+	scrape := func(s *postgreSQLScraper, calls, totalExecTime string) []int64 {
+		mock.ExpectQuery("LIMIT 3").WillReturnRows(buildRows(calls, totalExecTime))
+		logs, scrapeErr := s.scrapeTopQuery(t.Context(), cfg.TopQueryCollection.MaxRowsPerQuery, cfg.TopQueryCollection.TopNQuery, cfg.TopQueryCollection.MaxExplainEachInterval, 0)
+		require.NoError(t, scrapeErr)
+		require.NoError(t, mock.ExpectationsWereMet())
+		var got []int64
+		for _, rl := range logs.ResourceLogs().All() {
+			for _, sl := range rl.ScopeLogs().All() {
+				for _, lr := range sl.LogRecords().All() {
+					got = append(got, lr.Attributes().AsRaw()[dbAttributePrefix+callsColumnName].(int64))
+				}
+			}
+		}
+		return got
+	}
+
+	scraper := newScraper()
+	assert.Empty(t, scrape(scraper, "1000", "1000"), "cold cache must seed, not emit the lifetime total")
+	assert.Equal(t, []int64{10}, scrape(scraper, "1010", "1100"))
+	// pg_stat_statements_reset(): counters drop below the cached values.
+	assert.Equal(t, []int64{5}, scrape(scraper, "5", "50"), "a decreased counter must be reported as a reset, not 0")
+	assert.Equal(t, []int64{4}, scrape(scraper, "9", "90"), "the cache must be re-seeded after a reset (no blackout)")
+
+	// A collector restart (new scraper, empty cache) must not emit the lifetime total.
+	restarted := newScraper()
+	assert.Empty(t, scrape(restarted, "5000", "9000"), "restart must not spike with lifetime totals")
 	mock.ExpectClose()
 }

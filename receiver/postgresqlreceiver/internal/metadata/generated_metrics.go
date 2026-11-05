@@ -172,6 +172,36 @@ var MapAttributeOperation = map[string]AttributeOperation{
 	"hot_upd": AttributeOperationHotUpd,
 }
 
+// AttributeOutcome specifies the value outcome attribute.
+type AttributeOutcome int
+
+const (
+	_ AttributeOutcome = iota
+	AttributeOutcomeSeeded
+	AttributeOutcomeEvicted
+	AttributeOutcomeDuplicated
+)
+
+// String returns the string representation of the AttributeOutcome.
+func (av AttributeOutcome) String() string {
+	switch av {
+	case AttributeOutcomeSeeded:
+		return "seeded"
+	case AttributeOutcomeEvicted:
+		return "evicted"
+	case AttributeOutcomeDuplicated:
+		return "duplicated"
+	}
+	return ""
+}
+
+// MapAttributeOutcome is a helper map of string to AttributeOutcome attribute value.
+var MapAttributeOutcome = map[string]AttributeOutcome{
+	"seeded":     AttributeOutcomeSeeded,
+	"evicted":    AttributeOutcomeEvicted,
+	"duplicated": AttributeOutcomeDuplicated,
+}
+
 // AttributePostgresqlConflictType specifies the value postgresql.conflict.type attribute.
 type AttributePostgresqlConflictType int
 
