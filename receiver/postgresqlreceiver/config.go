@@ -76,10 +76,11 @@ const (
 )
 
 // column is the pg_stat_statements column to order by; "" for an invalid value.
-// The template only ever receives one of these fixed names.
+// An unset order means calls. The template only ever receives one of these
+// fixed names.
 func (o TopQueryCandidateOrder) column() string {
 	switch o {
-	case TopQueryCandidateOrderCalls:
+	case "", TopQueryCandidateOrderCalls:
 		return "calls"
 	case TopQueryCandidateOrderTotalTime:
 		return "total_exec_time"

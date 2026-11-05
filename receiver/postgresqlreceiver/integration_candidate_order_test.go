@@ -17,12 +17,16 @@ import (
 // max_rows_per_query when candidates are ordered by calls, so a rare slow
 // statement is never fetched; ordered by total_time it is.
 func TestIntegrationTopQueryCandidateOrder(t *testing.T) {
-	t.Run("calls", func(t *testing.T) { testTopQueryCandidateOrder(t, TopQueryCandidateOrderCalls, false) })
-	t.Run("total_time", func(t *testing.T) { testTopQueryCandidateOrder(t, TopQueryCandidateOrderTotalTime, true) })
+	// PostgreSQL 13 uses the GROUP BY template (ordering by the SUM alias);
+	// PostgreSQL 17 the per-entry template with toplevel.
+	for _, v := range []string{pre17TestVersion, post17TestVersion} {
+		t.Run(v+"/calls", func(t *testing.T) { testTopQueryCandidateOrder(t, v, TopQueryCandidateOrderCalls, false) })
+		t.Run(v+"/total_time", func(t *testing.T) { testTopQueryCandidateOrder(t, v, TopQueryCandidateOrderTotalTime, true) })
+	}
 }
 
-func testTopQueryCandidateOrder(t *testing.T, order TopQueryCandidateOrder, wantSlow bool) {
-	h := startTopQueryHarness(t, post17TestVersion)
+func testTopQueryCandidateOrder(t *testing.T, pgVersion string, order TopQueryCandidateOrder, wantSlow bool) {
+	h := startTopQueryHarness(t, pgVersion)
 	h.cfg.TopQueryCollection.CandidateOrder = order
 	h.cfg.TopQueryCollection.MaxRowsPerQuery = 3
 	h.cfg.TopQueryCollection.TopNQuery = 3

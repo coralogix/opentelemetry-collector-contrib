@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/confmap"
 	"go.opentelemetry.io/collector/receiver"
+	"go.uber.org/zap"
 )
 
 func TestTopQueryCandidateOrderConfig(t *testing.T) {
@@ -74,4 +75,36 @@ func TestTopQueryCandidateOrderReachesTheQuery(t *testing.T) {
 	s.expectInfo(0, t1)
 	s.mock.ExpectQuery(`toplevel::TEXT[\s\S]*ORDER BY total_exec_time DESC\s+LIMIT 3`).WillReturnRows(sqlmock.NewRows(topQueryColumns))
 	s.scrape(t, 0)
+}
+
+func TestTopQueryCandidateOrderEmptyIsCalls(t *testing.T) {
+	cfg := createDefaultConfig().(*Config)
+	cfg.Username, cfg.Password = "otel", "otel"
+	cfg.TopQueryCollection.CandidateOrder = ""
+	require.NoError(t, confmap.Validate(cfg), "an unset candidate_order means calls")
+	assert.Equal(t, "calls", TopQueryCandidateOrder("").column())
+}
+
+// TestTopQueryCandidateOrderClientMapsColumn: the client takes the typed
+// order and maps it to the column itself.
+func TestTopQueryCandidateOrderClientMapsColumn(t *testing.T) {
+	for _, tc := range []struct {
+		order TopQueryCandidateOrder
+		want  string
+	}{
+		{TopQueryCandidateOrderTotalTime, `ORDER BY total_exec_time DESC`},
+		{TopQueryCandidateOrderCalls, `ORDER BY calls DESC`},
+		{"", `ORDER BY calls DESC`},
+	} {
+		t.Run(string(tc.order), func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			require.NoError(t, err)
+			defer db.Close()
+			mock.ExpectQuery(tc.want + `\s+LIMIT 5`).WillReturnRows(sqlmock.NewRows(topQueryColumns))
+			c := &postgreSQLClient{client: db}
+			_, err = c.getTopQuery(t.Context(), 5, nil, true, false, tc.order, zap.NewNop())
+			require.NoError(t, err)
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
 }

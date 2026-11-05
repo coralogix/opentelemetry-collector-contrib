@@ -82,9 +82,8 @@ type client interface {
 	// toplevel selects pg_stat_statements.toplevel (pg_stat_statements 1.9+, PostgreSQL 14+).
 	// statsSince selects pg_stat_statements.stats_since as epoch microseconds
 	// (pg_stat_statements 1.11+, PostgreSQL 17+); it requires toplevel.
-	// orderBy is the pg_stat_statements column the candidates are ordered by
-	// (TopQueryCandidateOrder.column); "" means calls.
-	getTopQuery(ctx context.Context, limit int64, excludedDatabases []string, toplevel, statsSince bool, orderBy string, logger *zap.Logger) ([]map[string]any, error)
+	// order selects the pg_stat_statements column the candidates are ordered by.
+	getTopQuery(ctx context.Context, limit int64, excludedDatabases []string, toplevel, statsSince bool, order TopQueryCandidateOrder, logger *zap.Logger) ([]map[string]any, error)
 	getStatStatementsInfo(ctx context.Context) (statStatementsInfo, error)
 	getStatStatementsCapabilities(ctx context.Context) (serverVersionNum int64, extVersion string, err error)
 	explainQuery(ctx context.Context, query, queryID string, logger *zap.Logger) (string, error)
@@ -1742,10 +1741,12 @@ func isUndefinedTable(err error) bool {
 }
 
 // getTopQuery implements client.
-func (c *postgreSQLClient) getTopQuery(ctx context.Context, limit int64, excludedDatabases []string, toplevel, statsSince bool, orderBy string, logger *zap.Logger) ([]map[string]any, error) {
+func (c *postgreSQLClient) getTopQuery(ctx context.Context, limit int64, excludedDatabases []string, toplevel, statsSince bool, order TopQueryCandidateOrder, logger *zap.Logger) ([]map[string]any, error) {
 	buf := bytes.Buffer{}
+	orderBy := order.column()
 	if orderBy == "" {
-		orderBy = TopQueryCandidateOrderCalls.column()
+		// Validate rejects such a value; never pass unknown text to the SQL.
+		return []map[string]any{}, fmt.Errorf("invalid top_query candidate order %q", order)
 	}
 
 	// TODO: Only get query after the oldest query we got from the previous sample query colelction.

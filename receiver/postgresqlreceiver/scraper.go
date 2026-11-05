@@ -486,7 +486,7 @@ func (p *postgreSQLScraper) collectTopQuery(ctx context.Context, clientFactory p
 	statsReset, statsInfo, statsInfoRead := p.detectStatsReset(ctx, defaultDbClient, logger)
 
 	cumulative := p.config.TopQueryCollection.Temporality == TopQueryTemporalityCumulative
-	rows, err := defaultDbClient.getTopQuery(ctx, limit, p.excludedDatabases, p.toplevelSupported, cumulative && p.statsSinceSupported, p.config.TopQueryCollection.CandidateOrder.column(), logger)
+	rows, err := defaultDbClient.getTopQuery(ctx, limit, p.excludedDatabases, p.toplevelSupported, cumulative && p.statsSinceSupported, p.config.TopQueryCollection.CandidateOrder, logger)
 	if err != nil {
 		if isUndefinedColumn(err) || isUndefinedTable(err) {
 			p.invalidateStatStatementsCapabilities(logger, err)
