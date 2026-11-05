@@ -80,7 +80,9 @@ type client interface {
 	getVersion(ctx context.Context) (string, error)
 	getQuerySamples(ctx context.Context, limit int64, newestQueryTimestamp float64, excludedDatabases []string, logger *zap.Logger) ([]map[string]any, float64, error)
 	// toplevel selects pg_stat_statements.toplevel (pg_stat_statements 1.9+, PostgreSQL 14+).
-	getTopQuery(ctx context.Context, limit int64, excludedDatabases []string, toplevel bool, logger *zap.Logger) ([]map[string]any, error)
+	// statsSince selects pg_stat_statements.stats_since as epoch microseconds
+	// (pg_stat_statements 1.11+, PostgreSQL 17+); it requires toplevel.
+	getTopQuery(ctx context.Context, limit int64, excludedDatabases []string, toplevel, statsSince bool, logger *zap.Logger) ([]map[string]any, error)
 	getStatStatementsInfo(ctx context.Context) (statStatementsInfo, error)
 	getStatStatementsCapabilities(ctx context.Context) (serverVersionNum int64, extVersion string, err error)
 	explainQuery(ctx context.Context, query, queryID string, logger *zap.Logger) (string, error)
@@ -1738,7 +1740,7 @@ func isUndefinedTable(err error) bool {
 }
 
 // getTopQuery implements client.
-func (c *postgreSQLClient) getTopQuery(ctx context.Context, limit int64, excludedDatabases []string, toplevel bool, logger *zap.Logger) ([]map[string]any, error) {
+func (c *postgreSQLClient) getTopQuery(ctx context.Context, limit int64, excludedDatabases []string, toplevel, statsSince bool, logger *zap.Logger) ([]map[string]any, error) {
 	buf := bytes.Buffer{}
 
 	// TODO: Only get query after the oldest query we got from the previous sample query colelction.
@@ -1748,6 +1750,7 @@ func (c *postgreSQLClient) getTopQuery(ctx context.Context, limit int64, exclude
 		"limit":             limit,
 		"excludedDatabases": quoteDatabaseList(excludedDatabases),
 		"toplevel":          toplevel,
+		"statsSince":        toplevel && statsSince,
 	}); err != nil {
 		logger.Error("failed to execute template", zap.Error(err))
 		return []map[string]any{}, fmt.Errorf("failed executing template: %w", err)

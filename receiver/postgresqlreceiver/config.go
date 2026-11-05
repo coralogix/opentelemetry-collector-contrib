@@ -44,9 +44,23 @@ type TopQueryCollection struct {
 	QueryPlanCacheSize     int           `mapstructure:"query_plan_cache_size"`
 	QueryPlanCacheTTL      time.Duration `mapstructure:"query_plan_cache_ttl"`
 	CollectionInterval     time.Duration `mapstructure:"collection_interval"`
+	// Temporality selects how db.server.top_query reports statement counters:
+	// "delta" (default) reports per-interval deltas computed in the receiver;
+	// "cumulative" reports the raw pg_stat_statements counters of every fetched
+	// statement with postgresql.start_time and postgresql.toplevel, so a
+	// downstream consumer computes the deltas.
+	Temporality TopQueryTemporality `mapstructure:"temporality"`
 	// prevent unkeyed literal initialization
 	_ struct{}
 }
+
+// TopQueryTemporality is the aggregation temporality of top_query counters.
+type TopQueryTemporality string
+
+const (
+	TopQueryTemporalityDelta      TopQueryTemporality = "delta"
+	TopQueryTemporalityCumulative TopQueryTemporality = "cumulative"
+)
 
 type QuerySampleCollection struct {
 	MaxRowsPerQuery int64 `mapstructure:"max_rows_per_query"`
@@ -135,6 +149,13 @@ func (cfg *Config) Validate() error {
 
 	if cfg.LogsBuilderConfig.Events.DbServerQueryPlan.Enabled && !cfg.LogsBuilderConfig.Events.DbServerTopQuery.Enabled {
 		err = multierr.Append(err, errQueryPlanWithoutTopQuery)
+	}
+
+	switch cfg.TopQueryCollection.Temporality {
+	case TopQueryTemporalityDelta, TopQueryTemporalityCumulative:
+	default:
+		err = multierr.Append(err, fmt.Errorf("invalid config: 'top_query_collection.temporality' must be %q or %q, got %q",
+			TopQueryTemporalityDelta, TopQueryTemporalityCumulative, cfg.TopQueryCollection.Temporality))
 	}
 
 	return err

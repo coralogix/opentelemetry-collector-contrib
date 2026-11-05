@@ -1000,6 +1000,7 @@ func TestTopQueryTemplateRendering(t *testing.T) {
 		name           string
 		excludes       []string
 		toplevel       bool
+		statsSince     bool
 		expectedClause string
 	}{
 		{
@@ -1017,6 +1018,13 @@ func TestTopQueryTemplateRendering(t *testing.T) {
 			toplevel:       true,
 			expectedClause: "total_plan_time,\n  toplevel::TEXT\nFROM",
 		},
+		{
+			// Cumulative mode on pg_stat_statements 1.11+ (PostgreSQL 17+) adds the per-entry start time.
+			name:           "stats_since is selected for cumulative mode",
+			toplevel:       true,
+			statsSince:     true,
+			expectedClause: "toplevel::TEXT,\n  (EXTRACT(EPOCH FROM stats_since) * 1000000)::BIGINT::TEXT AS stats_since\nFROM",
+		},
 	}
 
 	for _, tc := range tests {
@@ -1026,6 +1034,7 @@ func TestTopQueryTemplateRendering(t *testing.T) {
 				"limit":             int64(10),
 				"excludedDatabases": quoteDatabaseList(tc.excludes),
 				"toplevel":          tc.toplevel,
+				"statsSince":        tc.statsSince,
 			})
 			require.NoError(t, err)
 
@@ -2388,7 +2397,7 @@ func (*mockClient) getStatStatementsInfo(context.Context) (statStatementsInfo, e
 	return statStatementsInfo{}, nil
 }
 
-func (*mockClient) getTopQuery(context.Context, int64, []string, bool, *zap.Logger) ([]map[string]any, error) {
+func (*mockClient) getTopQuery(context.Context, int64, []string, bool, bool, *zap.Logger) ([]map[string]any, error) {
 	panic("unimplemented")
 }
 
