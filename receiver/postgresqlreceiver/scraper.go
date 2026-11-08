@@ -73,6 +73,10 @@ type postgreSQLScraper struct {
 	// cumulativeExtras holds, in recording order, the attributes that cumulative
 	// mode adds to each db.server.top_query record after it was emitted.
 	cumulativeExtras []cumulativeExtra
+	// querySampleRawText holds, in recording order, the raw statement text of
+	// each db.server.query_sample record. Filled only when
+	// dbm.allow_literal_capture is true. [DBM P5]
+	querySampleRawText []string
 	// capabilitiesProbedAt is when a negative or failed capability probe last ran;
 	// the zero time forces a probe on the next scrape.
 	capabilitiesProbedAt time.Time
@@ -333,7 +337,13 @@ func (p *postgreSQLScraper) scrapeQuerySamples(ctx context.Context, maxRowsPerQu
 	defer dbClient.Close()
 
 	rb := p.setupLogsResourceBuilder(p.lb.NewResourceBuilder())
-	return p.lb.Emit(metadata.WithLogsResource(rb.Emit())), nil
+	logs := p.lb.Emit(metadata.WithLogsResource(rb.Emit()))
+	rawText := p.querySampleRawText
+	p.querySampleRawText = nil
+	if p.config.DBM.AllowLiteralCapture {
+		applyQuerySampleRawText(logs, rawText, p.logger)
+	}
+	return logs, nil
 }
 
 func (p *postgreSQLScraper) scrapeTopQuery(ctx context.Context, maxRowsPerQuery, topNQuery, maxExplainEachInterval int64, collectionInterval time.Duration) (plog.Logs, error) {
@@ -434,6 +444,9 @@ func (p *postgreSQLScraper) collectQuerySamples(ctx context.Context, dbClient cl
 			if ctx, ok := ctxFromQuery.(context.Context); ok {
 				logCtx = ctx
 			}
+		}
+		if p.config.DBM.AllowLiteralCapture {
+			p.querySampleRawText = append(p.querySampleRawText, attrString(atts, querySampleRawTextKey))
 		}
 		p.lb.RecordDbServerQuerySampleEvent(
 			logCtx,

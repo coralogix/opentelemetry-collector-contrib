@@ -16,6 +16,13 @@ $defs:
       max_open:
         x-pointer: true
         type: integer
+  dbm_config:
+    description: DBMConfig holds Coralogix Database Monitoring (DBM) options.
+    type: object
+    properties:
+      allow_literal_capture:
+        description: 'AllowLiteralCapture adds the un-obfuscated statement text to each db.server.query_sample record as db.query.text.raw. Default false. The receiver applies no redaction to it: the DBM edge processor (dbmprocessor) runs the credential rule and deletes the attribute unless a Full capture lease applies, so it must run in every pipeline that receives these records.'
+        type: boolean
   query_sample_collection:
     type: object
     properties:
@@ -68,6 +75,9 @@ properties:
   db_auth:
     description: DBAuth optionally sources the connection credential from a db_auth provider extension (e.g. AWS IAM) instead of a static password. When set, the provider supplies the password at connection-open time. Mutually exclusive with the top-level password field.
     $ref: /config/configdbauth.id
+  dbm:
+    description: DBM holds Coralogix Database Monitoring options.
+    $ref: dbm_config
   exclude_databases:
     type: array
     items:
