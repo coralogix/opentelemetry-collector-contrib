@@ -1,0 +1,19 @@
+DBM_PATCHES.md
+  s_bedf3f0719adb4::t_96900ff1782105 21,31-32
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "597dff628c9f14d7950ccc7ae50eb366760d8875",
+  "prompts": {},
+  "sessions": {
+    "s_bedf3f0719adb4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "47adfeca-1365-4e31-bd2c-8ca70bd7d948",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "oded-dd <oded@coralogix.com>"
+    }
+  }
+}
