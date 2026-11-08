@@ -1,0 +1,23 @@
+internal/tidylist/tidylist.txt
+  s_f831f252c737d7::t_0cb1cfe3869042 71
+pkg/translator/loki/go.sum
+  s_f831f252c737d7::t_1669d809d429a6 96-97
+receiver/journaldreceiver/go.sum
+  s_f831f252c737d7::t_65dc4a7e2e9c95 66-67
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f8621b3a0b39e229c8b92e0393c4df070508e758",
+  "prompts": {},
+  "sessions": {
+    "s_f831f252c737d7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1d17d887-0e27-40f9-aede-50f0536246af",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "oded-dd <oded@coralogix.com>"
+    }
+  }
+}
