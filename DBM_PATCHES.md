@@ -2,7 +2,7 @@
 
 Receiver patches that Coralogix Database Monitoring (DBM) carries on `feat/dbm` on top of the upstream release this fork is based on. Policy: DBM S2 fork maintenance policy and ADR-0008 (amended by DEV-035) in the DBM program repo.
 
-- **Fork base:** upstream `v0.164.1` (#33). `feat/dbm` = that base + P1 (merge `7d3bb20ae6`) + P2 (merge `a7fd327a8f`) + P3 (merge `5eea123dbc`), 2026-11-05.
+- **Fork base:** upstream `v0.164.1` (#33). `feat/dbm` = that base + P1 (merge `7d3bb20ae6`) + P2 (merge `a7fd327a8f`) + P3 (merge `5eea123dbc`), 2026-11-05; + fork CI cleanup #41 (`4317173470`) + P5 (merge `ac329a0db6`), 2026-11-08.
 - **One branch per patch** (`feat/dbm-p<N>-<slug>`), with self-contained commits, so each patch can become its own upstream PR at UPSTREAM-FINAL. This file is never part of a patch branch.
 - **Upstream syncs:** merge upstream **release tags** only (see `UPSTREAM_UPDATE.md`), within 5 working days of each contrib release, together with the cdot bump. Never more than 2 minors behind.
 - **Per-merge gate** for each patched receiver: unit tests with `-race`, `make generate` + `git diff --exit-code`, `make lint`, and the receiver's `TestIntegrationTopQuery*` tests. Regenerate generated files; never hand-merge them.
@@ -18,7 +18,7 @@ Receiver patches that Coralogix Database Monitoring (DBM) carries on `feat/dbm` 
 | P2 | `receiver/postgresqlreceiver` | `config.go`, `config.schema.yaml`, `factory.go`, `client.go`, `scraper.go`, `templates/topQueryTemplate.tmpl`, `README.md`, tests, `.chloggen` | EC-02 (CX-68220) | `feat/dbm-p2-cumulative-start-time`, #35 | `7d3bb20ae6..acfc681faa` (5), merged into `feat/dbm` as `a7fd327a8f` | — | carried (merged into `feat/dbm` 2026-11-05) | v0.164.1 | upstream release with cumulative top_query + start time + toplevel, in cdot |
 | P3 | `receiver/postgresqlreceiver` | `config.go`, `config.schema.yaml`, `factory.go`, `client.go`, `scraper.go`, `templates/topQueryTemplate.tmpl`, `README.md`, tests, `.chloggen` | EC-02 (CX-68220) | `feat/dbm-p3-candidate-order`, #36 | `a7fd327a8f..23df35c5e1` (4; rebased onto P2), merged into `feat/dbm` as `5eea123dbc` | — | carried (merged into `feat/dbm` 2026-11-05) | v0.164.1 | upstream release with a top_query candidate order by time, in cdot |
 | P4 | `receiver/oracledbreceiver` | — | EC-03 | — | — | — | planned | — | — |
-| P5 | `receiver/postgresqlreceiver` | `config.go`, `config.schema.yaml`, `client.go`, `scraper.go`, `query_sample_raw_text.go` (new), `README.md`, tests, `.chloggen` | EC-04 (CX-68221) | `feat/dbm-p5-raw-text`, #39 | `3262ab9ef6..d09fc90597` (2) | — | in review (draft, not merged) | v0.164.1 | upstream release with an opt-in raw query sample text (name may change, S2 R5), in cdot |
+| P5 | `receiver/postgresqlreceiver` | `config.go`, `config.schema.yaml`, `client.go`, `scraper.go`, `query_sample_raw_text.go` (new), `README.md`, tests, `.chloggen` | EC-04 (CX-68221) | `feat/dbm-p5-raw-text`, #39 | `3262ab9ef6..d09fc90597` (2), then `d87c1862a9` merging `feat/dbm` (#41) in; merged into `feat/dbm` as `ac329a0db6` | — | carried (merged into `feat/dbm` 2026-11-08) | v0.164.1 | upstream release with an opt-in raw query sample text (name may change, S2 R5), in cdot |
 
 Not carried in the fork (S2 decision 2): instance totals (preset `sqlquery` sweeps, EC-07); entity emission and `dbmprocessor` (cdot repo, EC-05 / EC-06).
 
