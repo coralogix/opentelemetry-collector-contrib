@@ -1,0 +1,199 @@
+cmd/opampsupervisor/go.mod
+  s_f831f252c737d7::t_1c81dce1a5a1d9 461-462
+confmap/provider/objstoreprovider/go.mod
+  s_f831f252c737d7::t_38d4480d6cb6cf 3,7,9,15-22,28-30,49-50,53-55,57,59,70-71,74,78,95,100,104-113,117-129
+confmap/provider/objstoreprovider/go.sum
+  s_f831f252c737d7::t_6171786913291b 1-22,39-46,88-89,91-92,101-104,107-110,115-116,122-123,154-157,166-167,175-176,216-217,232-233,235-236,239-240,251-276,287-292,294-295,298-303,305-318
+exporter/alibabacloudlogserviceexporter/go.mod
+  s_f831f252c737d7::t_e36fedadd848af 40
+exporter/alibabacloudlogserviceexporter/go.sum
+  s_f831f252c737d7::t_d55b0f6831e35f 72-73
+exporter/azureblobexporter/go.mod
+  s_f831f252c737d7::t_0fd108944b622c 9
+exporter/azureblobexporter/go.sum
+  s_f831f252c737d7::t_049f2b457bfce3 59-60
+exporter/clickhouseexporter/go.mod
+  s_f831f252c737d7::t_0cd04c48bf30d9 37,63
+exporter/clickhouseexporter/go.sum
+  s_f831f252c737d7::t_dbcbbbe5d630cd 13-14,84-85
+exporter/fileexporter/go.mod
+  s_26fc16030181cc::t_bed7a93564037a 8
+exporter/fileexporter/go.sum
+  s_26fc16030181cc::t_cc79b517886dfc 33-34
+exporter/googlecloudstorageexporter/go.mod
+  s_26fc16030181cc::t_1eb53deb50f99b 9
+exporter/googlecloudstorageexporter/go.sum
+  s_26fc16030181cc::t_fa741754e7ef54 81-82
+exporter/natsexporter/go.mod
+  s_26fc16030181cc::t_50541bca5a81e2 51
+exporter/natsexporter/go.sum
+  s_26fc16030181cc::t_394dc6ae78aab0 66-67
+exporter/pulsarexporter/go.mod
+  s_f831f252c737d7::t_3e78eba348f336 57
+exporter/pulsarexporter/go.sum
+  s_f831f252c737d7::t_e031ecc8ab8c28 104-105
+exporter/rabbitmqexporter/go.mod
+  s_f831f252c737d7::t_83ad29eaa1731f 55
+exporter/rabbitmqexporter/go.sum
+  s_f831f252c737d7::t_9d5ef5f8582ef1 72-73
+extension/encoding/awslogsencodingextension/go.mod
+  s_f831f252c737d7::t_cbfda2400bb893 8,30
+extension/encoding/awslogsencodingextension/go.sum
+  s_26fc16030181cc::t_2200ac69148e87 7-8,37-38
+extension/observer/dockerobserver/go.mod
+  s_26fc16030181cc::t_dbeab67feae479 49
+extension/observer/dockerobserver/go.sum
+  s_26fc16030181cc::t_d0d99ef91d4884 66-67
+extension/sdnotifyextension/go.mod
+  s_26fc16030181cc::t_70b7e05247af6c 44
+extension/sdnotifyextension/go.sum
+  s_26fc16030181cc::t_7aef4d8fde3765 60-61
+extension/storage/dbstorage/go.mod
+  s_26fc16030181cc::t_51049a6601a874 49
+extension/storage/dbstorage/go.sum
+  s_f831f252c737d7::t_82de9aa2e67e76 75-76
+extension/tailstorage/pebbletailstorageextension/go.mod
+  s_f831f252c737d7::t_06ba263864a86e 44
+extension/tailstorage/pebbletailstorageextension/go.sum
+  s_f831f252c737d7::t_48d362282ac640 64-65
+internal/aws/xray/testdata/sampleapp/go.mod
+  s_f831f252c737d7::t_7768c1da879a71 14,30
+internal/aws/xray/testdata/sampleapp/go.sum
+  s_f831f252c737d7::t_0ad0e08f46f696 3-4,55-56,67-68
+internal/aws/xray/testdata/sampleserver/go.mod
+  s_f831f252c737d7::t_8a454e2ff7063f 8,10
+internal/aws/xray/testdata/sampleserver/go.sum
+  s_f831f252c737d7::t_2974d1bf3a6aa6 3-4,15-16,27-28
+internal/coreinternal/go.mod
+  s_f831f252c737d7::t_2224d56fef1d81 53
+internal/coreinternal/go.sum
+  s_f831f252c737d7::t_02fc52942aec9b 58-59
+internal/natsclient/go.mod
+  s_f831f252c737d7::t_8e11d903f8ef4c 26
+internal/natsclient/go.sum
+  s_f831f252c737d7::t_5507f8dae76624 17-18
+pkg/semconvtest/go.mod
+  s_f831f252c737d7::t_75dc01b96d17af 41
+pkg/semconvtest/go.sum
+  s_f831f252c737d7::t_2ed35a693193fb 56-57
+pkg/stanza/go.mod
+  s_f831f252c737d7::t_f3d79f8442e97c 64
+pkg/stanza/go.sum
+  s_f831f252c737d7::t_ced59cac17613c 85-86
+pkg/translator/prometheusremotewrite/go.mod
+  s_f831f252c737d7::t_00f61dbb9aa522 59
+pkg/translator/prometheusremotewrite/go.sum
+  s_f831f252c737d7::t_b54be76f7e6292 228-229
+receiver/aerospikereceiver/go.mod
+  s_f831f252c737d7::t_b43d6c8fc4edae 58
+receiver/aerospikereceiver/go.sum
+  s_f831f252c737d7::t_080c7eaa320bca 76-77
+receiver/awss3receiver/go.mod
+  s_f831f252c737d7::t_c225b59fd247d8 11
+receiver/awss3receiver/go.sum
+  s_f831f252c737d7::t_fb0fa2fedb86a7 65-66
+receiver/azureeventhubreceiver/go.mod
+  s_f831f252c737d7::t_7afa7dc7de069e 51
+receiver/azureeventhubreceiver/go.sum
+  s_f831f252c737d7::t_053bd3eefa4201 74-75
+receiver/dnscheckreceiver/go.mod
+  s_f831f252c737d7::t_0d59bb6668af76 53
+receiver/dnscheckreceiver/go.sum
+  s_f831f252c737d7::t_d487e1dcbd5788 60-61
+receiver/dockerstatsreceiver/go.mod
+  s_f831f252c737d7::t_139474d9881fa8 63
+receiver/dockerstatsreceiver/go.sum
+  s_f831f252c737d7::t_351558fd188ac0 68-69
+receiver/filestatsreceiver/go.mod
+  s_f831f252c737d7::t_dccf0fd65341cc 53
+receiver/filestatsreceiver/go.sum
+  s_f831f252c737d7::t_8af67f47d95b33 62-63
+receiver/hostmetricsreceiver/go.mod
+  s_f831f252c737d7::t_3be9ab4fbd0e19 65
+receiver/hostmetricsreceiver/go.sum
+  s_f831f252c737d7::t_e47cbd00ad7181 62-63
+receiver/icmpcheckreceiver/go.mod
+  s_f831f252c737d7::t_3a0cb2e0214163 53
+receiver/icmpcheckreceiver/go.sum
+  s_f831f252c737d7::t_6a39f5bc12a9dc 60-61
+receiver/iisreceiver/go.mod
+  s_f831f252c737d7::t_5bceb27be2843a 53
+receiver/iisreceiver/go.sum
+  s_f831f252c737d7::t_4f8b9fedb8bcc6 60-61
+receiver/memcachedreceiver/go.mod
+  s_f831f252c737d7::t_464c7dd73750c7 55
+receiver/memcachedreceiver/go.sum
+  s_f831f252c737d7::t_cf596e5ecd7b80 70-71
+receiver/mongodbreceiver/go.mod
+  s_f831f252c737d7::t_27c7b01e8efa6f 65
+receiver/mongodbreceiver/go.sum
+  s_f831f252c737d7::t_fe70fe30c994f3 87-88
+receiver/mysqlreceiver/go.mod
+  s_f831f252c737d7::t_29eda331794177 87
+receiver/mysqlreceiver/go.sum
+  s_f831f252c737d7::t_e834e93051f6c2 92-93
+receiver/natsreceiver/go.mod
+  s_f831f252c737d7::t_8ce3dbf6b02e33 33
+receiver/natsreceiver/go.sum
+  s_f831f252c737d7::t_9eb9e460767802 35-36
+receiver/postgresqlreceiver/go.mod
+  s_f831f252c737d7::t_d5f0781f6303c1 39-40,75
+receiver/postgresqlreceiver/go.sum
+  s_f831f252c737d7::t_4c9219fbce1953 88-89
+receiver/pulsarreceiver/go.mod
+  s_f831f252c737d7::t_4cc38b66dd883c 55
+receiver/pulsarreceiver/go.sum
+  s_26fc16030181cc::t_81f949a1ca5b17 102-103
+receiver/redisreceiver/go.mod
+  s_26fc16030181cc::t_4b3f7b63cc2bd3 57
+receiver/redisreceiver/go.sum
+  s_26fc16030181cc::t_dc0c165c4f4bd7 72-73
+receiver/snowflakereceiver/go.mod
+  s_26fc16030181cc::t_4fd168e6985db8 74
+receiver/snowflakereceiver/go.sum
+  s_f831f252c737d7::t_229455483aa800 110-111
+receiver/sqlqueryreceiver/go.mod
+  s_f831f252c737d7::t_a6867301ba1945 60,122
+receiver/sqlqueryreceiver/go.sum
+  s_f831f252c737d7::t_f77597439d3648 39-40,195-196
+receiver/sqlserverreceiver/go.mod
+  s_f831f252c737d7::t_53d9048837a8ba 75
+receiver/sqlserverreceiver/go.sum
+  s_26fc16030181cc::t_6f6c616962a86a 114-115
+receiver/vcenterreceiver/go.mod
+  s_26fc16030181cc::t_93e7ac5284f4f3 60
+receiver/vcenterreceiver/go.sum
+  s_f831f252c737d7::t_f6442462a89277 74-75
+receiver/windowsservicereceiver/go.mod
+  s_f831f252c737d7::t_c41e455ea57b46 50
+receiver/windowsservicereceiver/go.sum
+  s_f831f252c737d7::t_a476f201d0f6e4 60-61
+receiver/zookeeperreceiver/go.mod
+  s_f831f252c737d7::t_063595df7a3e62 46
+receiver/zookeeperreceiver/go.sum
+  s_f831f252c737d7::t_eab6cd0c7e7e82 60-61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e4114204663f5c580990fd7c726a1036ef73cfe3",
+  "prompts": {},
+  "sessions": {
+    "s_26fc16030181cc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2bc05c9f-6091-4dad-950b-b41d2fc78a09",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "oded-dd <oded@coralogix.com>"
+    },
+    "s_f831f252c737d7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1d17d887-0e27-40f9-aede-50f0536246af",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "oded-dd <oded@coralogix.com>"
+    }
+  }
+}
