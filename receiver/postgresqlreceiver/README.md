@@ -163,6 +163,25 @@ The following options are available:
 - `max_rows_per_query`: (optional, default=1000) The max number of rows would return from the query 
 against `pg_stat_activity`.
 
+#### Raw query text (`dbm.allow_literal_capture`)
+
+- `dbm.allow_literal_capture`: (optional, default=`false`) When `true`, each `db.server.query_sample`
+  record also carries the un-obfuscated statement text in `db.query.text.raw`. `db.query.text` stays
+  obfuscated. `db.server.top_query` records never carry the raw text.
+
+```yaml
+receivers:
+  postgresql:
+    dbm:
+      allow_literal_capture: true
+```
+
+**Warning:** the raw text can contain literal values, personal data and credentials (for example
+`ALTER ROLE ... PASSWORD '...'`). The receiver does not redact it. This option exists for Coralogix
+Database Monitoring, where the edge processor (`dbmprocessor`) runs the credential redaction rule and
+then **deletes `db.query.text.raw` from every record unless a Full capture lease applies**. Enable it
+only in a pipeline that runs that processor before any exporter. Without it, keep the option off.
+
 ### Top Query Collection
 We provide functionality to collect the most executed queries from PostgreSQL. It will get data from `pg_stat_statements` and report incremental value of `total_exec_time`, `total_plan_time`, `calls`, `rows`, `shared_blks_dirtied`, `shared_blks_hit`, `shared_blks_read`, `shared_blks_written`, `temp_blks_read`, `temp_blks_written`. To enable it, you will need the following configuration
 ```

@@ -1637,6 +1637,9 @@ func (c *postgreSQLClient) getQuerySamples(ctx context.Context, limit int64, new
 		currentAttributes[string(conventions.NetworkPeerPortKey)] = clientPort
 		currentAttributes[string(conventions.NetworkPeerAddressKey)] = row[querySampleColumnClientAddr]
 		currentAttributes[string(conventions.DBQueryTextKey)] = obfuscated
+		// Internal only: the scraper emits it as db.query.text.raw when
+		// dbm.allow_literal_capture is true. [DBM P5]
+		currentAttributes[querySampleRawTextKey] = row[querySampleColumnQuery]
 		currentAttributes[string(conventions.DBNamespaceKey)] = row[querySampleColumnDatname]
 		currentAttributes[string(conventions.UserNameKey)] = row[querySampleColumnUsename]
 		currentAttributes[postgresqlTotalExecTimeAttributeName] = duration

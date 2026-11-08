@@ -89,6 +89,19 @@ func (o TopQueryCandidateOrder) column() string {
 	}
 }
 
+// DBMConfig holds Coralogix Database Monitoring (DBM) options.
+type DBMConfig struct {
+	// AllowLiteralCapture adds the un-obfuscated statement text to each
+	// db.server.query_sample record as db.query.text.raw. Default false.
+	// The receiver applies no redaction to it: the DBM edge processor
+	// (dbmprocessor) runs the credential rule and deletes the attribute
+	// unless a Full capture lease applies, so it must run in every pipeline
+	// that receives these records.
+	AllowLiteralCapture bool `mapstructure:"allow_literal_capture"`
+	// prevent unkeyed literal initialization
+	_ struct{}
+}
+
 type QuerySampleCollection struct {
 	MaxRowsPerQuery int64 `mapstructure:"max_rows_per_query"`
 	// prevent unkeyed literal initialization
@@ -112,6 +125,8 @@ type Config struct {
 	LogsBuilderConfig     metadata.LogsBuilderConfig    `mapstructure:",squash"`
 	QuerySampleCollection QuerySampleCollection         `mapstructure:"query_sample_collection,omitempty"`
 	TopQueryCollection    TopQueryCollection            `mapstructure:"top_query_collection,omitempty"`
+	// DBM holds Coralogix Database Monitoring options.
+	DBM DBMConfig `mapstructure:"dbm,omitempty"`
 	// DBAuth optionally sources the connection credential from a db_auth provider
 	// extension (e.g. AWS IAM) instead of a static password. When set, the provider
 	// supplies the password at connection-open time. Mutually exclusive with the
