@@ -1,0 +1,29 @@
+.chloggen/postgresqlreceiver-query-sample-raw-text.yaml
+  s_f831f252c737d7::t_c7ea784eb7a13e 1-22
+receiver/postgresqlreceiver/README.md
+  s_26fc16030181cc::t_8391224df3da1c 166-184
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d09fc9059776d796c2e205ccb8bcdcf9cbf416bd",
+  "prompts": {},
+  "sessions": {
+    "s_26fc16030181cc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2bc05c9f-6091-4dad-950b-b41d2fc78a09",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "oded-dd <oded@coralogix.com>"
+    },
+    "s_f831f252c737d7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1d17d887-0e27-40f9-aede-50f0536246af",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "oded-dd <oded@coralogix.com>"
+    }
+  }
+}
