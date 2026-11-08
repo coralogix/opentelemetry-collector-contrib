@@ -458,3 +458,5 @@ require (
 replace github.com/coralogix/opentelemetry-collector-contrib/confmap/provider/objstoreprovider => ../../confmap/provider/objstoreprovider
 
 replace github.com/open-telemetry/opentelemetry-collector-contrib/extension/internal/secretprovider => ../../extension/internal/secretprovider
+
+replace github.com/open-telemetry/opentelemetry-collector-contrib/confmap/provider/s3provider => ../../confmap/provider/s3provider
