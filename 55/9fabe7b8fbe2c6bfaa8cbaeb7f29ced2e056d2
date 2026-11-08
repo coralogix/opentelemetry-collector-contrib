@@ -1,0 +1,31 @@
+receiver/postgresqlreceiver/query_sample_raw_text.go
+  s_f831f252c737d7::t_4978bb593894ce 49-53
+  s_f831f252c737d7::t_79719f00dac063 46-48
+  s_f831f252c737d7::t_1e7c276f7d1c01 54-55
+receiver/postgresqlreceiver/query_sample_raw_text_test.go
+  s_f831f252c737d7::t_098aa3695e4783 1-173
+receiver/postgresqlreceiver/client.go
+  s_f831f252c737d7::t_7c5c15b8f42806 1640-1642
+receiver/postgresqlreceiver/config.go
+  s_f831f252c737d7::t_28e197d955e98e 92-104,128-129
+receiver/postgresqlreceiver/config.schema.yaml
+  s_f831f252c737d7::t_b5c54e67965d54 19-25,78-80
+receiver/postgresqlreceiver/scraper.go
+  s_f831f252c737d7::t_b48aa107f06db9 76-79,340-346,448-450
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "559fabe7b8fbe2c6bfaa8cbaeb7f29ced2e056d2",
+  "prompts": {},
+  "sessions": {
+    "s_f831f252c737d7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1d17d887-0e27-40f9-aede-50f0536246af",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "oded-dd <oded@coralogix.com>"
+    }
+  }
+}
