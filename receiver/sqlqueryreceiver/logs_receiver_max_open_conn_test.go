@@ -120,7 +120,7 @@ func startCountedLogsReceiver(t *testing.T, maxOpenConn int) (*logsReceiver, *co
 	)
 	require.NoError(t, err)
 	require.NoError(t, r.Start(t.Context(), componenttest.NewNopHost()))
-	t.Cleanup(func() { _ = r.Shutdown(context.Background()) })
+	t.Cleanup(func() { _ = r.Shutdown(context.WithoutCancel(t.Context())) })
 	return r.(*logsReceiver), c, opens
 }
 
