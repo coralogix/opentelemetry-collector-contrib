@@ -1,0 +1,19 @@
+receiver/sqlqueryreceiver/logs_receiver_max_open_conn_test.go
+  s_f831f252c737d7::t_c1d24e04b42e9f 1-154
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ac4d460429859edb1cb05411577871207dc4abea",
+  "prompts": {},
+  "sessions": {
+    "s_f831f252c737d7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1d17d887-0e27-40f9-aede-50f0536246af",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "oded-dd <oded@coralogix.com>"
+    }
+  }
+}
