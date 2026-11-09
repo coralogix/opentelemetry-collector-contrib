@@ -65,7 +65,7 @@ The SQL Query Receiver uses custom SQL queries to generate logs and/or metrics f
 - `telemetry` (optional) Defines settings for the component's own telemetry - logs, metrics or traces.
   - `telemetry.logs` (optional) Defines settings for the component's own logs.
     - `telemetry.logs.query` (optional, default `false`) If set to `true`, every time a SQL query is run, the text of the query and the values of its parameters will be logged together with the debug log `"Running query"`.
-- `max_open_conn` (optional, default `0`): The maximumn number of open connections to the sql server. <= 0 means unlimited
+- `max_open_conn` (optional, default `0`): The maximumn number of open connections to the sql server. <= 0 means unlimited. In the logs receiver, a value > 0 makes all queries of the receiver share one pool of at most that many connections, with no idle connection kept between collections; <= 0 keeps one pool per query
 
 [storage_extension]: https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/extension/storage/filestorage
 

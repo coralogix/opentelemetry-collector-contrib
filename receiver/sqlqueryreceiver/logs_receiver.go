@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"go.opentelemetry.io/collector/component"
@@ -29,6 +30,7 @@ type logsReceiver struct {
 	config           *Config
 	settings         receiver.Settings
 	createConnection sqlquery.DbProviderFunc
+	openConnection   sqlquery.DbProviderFunc // opens a new pool (createConnection without P6)
 	createClient     sqlquery.ClientProviderFunc
 	queryReceivers   []*logsQueryReceiver
 	nextConsumer     consumer.Logs
@@ -67,12 +69,14 @@ func newLogsReceiver(
 		}
 	}
 
+	open := func() (*sql.DB, error) {
+		return sqlOpenerFunc(config.Config.Driver, dataSource)
+	}
 	receiver := &logsReceiver{
-		config:   config,
-		settings: settings,
-		createConnection: func() (*sql.DB, error) {
-			return sqlOpenerFunc(config.Config.Driver, dataSource)
-		},
+		config:            config,
+		settings:          settings,
+		createConnection:  open,
+		openConnection:    open,
 		createClient:      createClient,
 		nextConsumer:      nextConsumer,
 		shutdownRequested: make(chan struct{}),
@@ -98,6 +102,12 @@ func (receiver *logsReceiver) Start(ctx context.Context, host component.Host) er
 		return fmt.Errorf("error connecting to storage: %w", err)
 	}
 
+	if receiver.config.MaxOpenConn > 0 {
+		// DBM P6: the queries share one pool of at most max_open_conn
+		// connections, and it keeps no idle connection between collections.
+		receiver.createConnection = sharedPool(receiver.openConnection, receiver.config.MaxOpenConn)
+	}
+
 	err = receiver.createQueryReceivers()
 	if err != nil {
 		return err
@@ -112,6 +122,29 @@ func (receiver *logsReceiver) Start(ctx context.Context, host component.Host) er
 	receiver.startCollecting()
 	receiver.settings.Logger.Debug("started.")
 	return nil
+}
+
+// sharedPool returns a DbProviderFunc that opens one pool on its first call
+// and returns it on every call. The pool has at most maxOpenConn connections
+// and no idle connection.
+func sharedPool(open sqlquery.DbProviderFunc, maxOpenConn int) sqlquery.DbProviderFunc {
+	var (
+		mu  sync.Mutex
+		db  *sql.DB
+		err error
+	)
+	return func() (*sql.DB, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if db == nil && err == nil {
+			db, err = open()
+			if err == nil && db != nil {
+				db.SetMaxOpenConns(maxOpenConn)
+				db.SetMaxIdleConns(0)
+			}
+		}
+		return db, err
+	}
 }
 
 func (receiver *logsReceiver) createQueryReceivers() error {
