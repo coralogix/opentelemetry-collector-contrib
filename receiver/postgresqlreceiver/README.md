@@ -163,6 +163,25 @@ The following options are available:
 - `max_rows_per_query`: (optional, default=1000) The max number of rows would return from the query 
 against `pg_stat_activity`.
 
+#### Raw query text (`dbm.allow_literal_capture`)
+
+- `dbm.allow_literal_capture`: (optional, default=`false`) When `true`, each `db.server.query_sample`
+  record also carries the un-obfuscated statement text in `db.query.text.raw`. `db.query.text` stays
+  obfuscated. `db.server.top_query` records never carry the raw text.
+
+```yaml
+receivers:
+  postgresql:
+    dbm:
+      allow_literal_capture: true
+```
+
+**Warning:** the raw text can contain literal values, personal data and credentials (for example
+`ALTER ROLE ... PASSWORD '...'`). The receiver does not redact it. This option exists for Coralogix
+Database Monitoring, where the edge processor (`dbmprocessor`) runs the credential redaction rule and
+then **deletes `db.query.text.raw` from every record unless a Full capture lease applies**. Enable it
+only in a pipeline that runs that processor before any exporter. Without it, keep the option off.
+
 ### Top Query Collection
 We provide functionality to collect the most executed queries from PostgreSQL. It will get data from `pg_stat_statements` and report incremental value of `total_exec_time`, `total_plan_time`, `calls`, `rows`, `shared_blks_dirtied`, `shared_blks_hit`, `shared_blks_read`, `shared_blks_written`, `temp_blks_read`, `temp_blks_written`. To enable it, you will need the following configuration
 ```
@@ -192,6 +211,7 @@ CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 The following options are available:
 - `max_rows_per_query`: (optional, default=1000) The max number of rows would return from the query 
 against `pg_stat_statements`.
+- `candidate_order`: (optional, default=`calls`). Which `max_rows_per_query` statements are fetched from `pg_stat_statements`: `calls` takes the most executed statements, `total_time` the statements with the most total execution time (`total_exec_time`), so a rarely run but slow statement is not missed.
 - `top_n_query`: (optional, default=200) The maximum number of active queries to report (to the next consumer) in a single run.
 - `max_explain_each_interval`: (optional, default=1000). The maximum number of explain query to be sent in each scrape interval. The top query 
 collection would not get the query plan directly. Instead, we need to mimic the query in the database and get the query plan from database 
@@ -200,6 +220,12 @@ separately. This could lead some resources usage and limit this will reduce the 
 This defines the cache's size for query plan.
 - `query_plan_cache_ttl`: (optional, default=1h). How long before the query plan cache got expired. Example values: `1m`, `1h`. 
 - `collection_interval`: (optional, default=60s). This receiver can collect top_query metrics on an interval. If not provided then the global collection_interval takes effect. This value must be a string readable by Golang's [time.ParseDuration](https://pkg.go.dev/time#ParseDuration). Valid time units are `ns`, `us` (or `µs`), `ms`, `s`, `m`, `h`.
+- `temporality`: (optional, default=`delta`). How `db.server.top_query` reports the statement counters.
+  - `delta`: per-interval deltas computed by the receiver, for the `top_n_query` statements with the most execution time in the interval.
+  - `cumulative`: the raw `pg_stat_statements` counters of every fetched statement (up to `max_rows_per_query`), so the next consumer computes deltas and keeps the top statements. Records are still ordered by execution time in the interval, and plans are attached to the first `top_n_query` only. Each record also carries:
+    - `postgresql.aggregation_temporality`: `cumulative`;
+    - `postgresql.start_time`: when the counters started, RFC 3339 UTC: the entry's `stats_since` (pg_stat_statements 1.11+, PostgreSQL 17+), else `pg_stat_statements_info.stats_reset` (pg_stat_statements 1.9+, PostgreSQL 14+); absent on older versions;
+    - `postgresql.toplevel` (bool, pg_stat_statements 1.9+): top-level and nested entries (`pg_stat_statements.track = 'all'`) are separate records instead of being summed.
 
 #### `db.server.query_plan`
 

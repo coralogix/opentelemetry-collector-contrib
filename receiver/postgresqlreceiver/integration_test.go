@@ -22,9 +22,11 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config/confignet"
 	"go.opentelemetry.io/collector/config/configtls"
-	"go.opentelemetry.io/collector/receiver"
+	"go.opentelemetry.io/collector/receiver/receivertest"
 	"go.opentelemetry.io/collector/scraper/scraperhelper"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/common/testutil"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal/scraperinttest"
@@ -737,11 +739,9 @@ func TestScrapeLogsFromContainer(t *testing.T) {
 	}
 	clientFactory := newDefaultClientFactory(&cfg)
 
-	ns, err := newPostgreSQLScraper(receiver.Settings{
-		TelemetrySettings: component.TelemetrySettings{
-			Logger: zap.Must(zap.NewProduction()),
-		},
-	}, &cfg, clientFactory, newCache(1), newTTLCache[string](1000, time.Second))
+	settings := receivertest.NewNopSettings(metadata.Type)
+	settings.Logger = zap.Must(zap.NewProduction())
+	ns, err := newPostgreSQLScraper(settings, &cfg, clientFactory, newCache(30*2), newTTLCache[string](1000, time.Second))
 	assert.NoError(t, err)
 	plogs, err := ns.scrapeQuerySamples(t.Context(), 30)
 	assert.NoError(t, err)
@@ -764,29 +764,19 @@ func TestScrapeLogsFromContainer(t *testing.T) {
 	assert.True(t, found, "Expected to find a log record with the query text")
 	assert.True(t, ns.newestQueryTimestamp > 0)
 
+	// The first top-query scrape seeds the delta cache and must not report the
+	// statement's lifetime totals.
 	firstTimeTopQueryPLogs, err := ns.scrapeTopQuery(t.Context(), 30, 30, 30, time.Minute)
 	assert.NoError(t, err)
-	logRecords = firstTimeTopQueryPLogs.ResourceLogs().At(0).ScopeLogs().At(0).LogRecords()
-	found = false
-	for _, record := range logRecords.All() {
-		attributes := record.Attributes().AsRaw()
-		queryAttribute, ok := attributes["db.query.text"]
-		query := strings.ToLower(queryAttribute.(string))
-		assert.True(t, ok)
-		if !strings.HasPrefix(query, "select * from test2 where") {
-			continue
+	for _, resourceLogs := range firstTimeTopQueryPLogs.ResourceLogs().All() {
+		for _, scopeLogs := range resourceLogs.ScopeLogs().All() {
+			for _, record := range scopeLogs.LogRecords().All() {
+				query, _ := record.Attributes().AsRaw()["db.query.text"].(string)
+				assert.False(t, strings.HasPrefix(strings.ToLower(query), "select * from test2 where"),
+					"first top query scrape must seed the cache, not emit lifetime totals")
+			}
 		}
-		assert.Equal(t, "select * from test2 where id = ?", query)
-		databaseAttribute, ok := attributes["db.namespace"]
-		assert.True(t, ok)
-		assert.Equal(t, "otel2", databaseAttribute.(string))
-		calls, ok := attributes["postgresql.calls"]
-		assert.True(t, ok)
-		assert.Equal(t, int64(1), calls.(int64))
-		assert.NotEmpty(t, attributes["postgresql.query_plan"])
-		found = true
 	}
-	assert.True(t, found, "Expected to find a log record with the query text from the first time top query")
 
 	_, err = db.Exec("Select * from test2 where id = 67")
 	assert.NoError(t, err)
@@ -811,10 +801,11 @@ func TestScrapeLogsFromContainer(t *testing.T) {
 		assert.Equal(t, "otel2", databaseAttribute.(string))
 		calls, ok := attributes["postgresql.calls"]
 		assert.True(t, ok)
-		assert.Equal(t, int64(2), calls.(int64))
+		assert.Equal(t, int64(1), calls.(int64), "second scrape reports the interval delta, not the lifetime total")
+		assert.NotEmpty(t, attributes["postgresql.query_plan"])
 		found = true
 	}
-	assert.True(t, found, "Expected to find a log record with the query text from the first time top query")
+	assert.True(t, found, "Expected to find a log record with the query text from the second time top query")
 }
 
 // pgvector image published on Docker Hub (same registry as the postgres image used
@@ -1204,5 +1195,263 @@ WHERE c.relname IN ('big_index_table', 'toasted_table') AND n.nspname = 'public'
 			"postgresql.table.size must equal pg_total_relation_size, not pg_relation_size alone")
 		assert.Greater(t, toastStats.size, toastRef.relationSize+toastRef.indexesSize,
 			"reported size must include TOAST data, not just the main heap and indexes")
+	}
+}
+
+// TestIntegrationTopQueryReset exercises the top_query delta semantics against a
+// real pg_stat_statements: a cold cache (first scrape, collector restart) must
+// seed rather than emit lifetime totals, and pg_stat_statements_reset() must be
+// reported as a reset rather than a 0 blackout until the counter climbs past
+// the stale cached value. On PostgreSQL 14+ pg_stat_statements_info.stats_reset
+// also catches a reset after which the counter already grew past the stale
+// value; before 14 only the decreasing-counter heuristic is available.
+func TestIntegrationTopQueryReset(t *testing.T) {
+	t.Run("pre14", func(t *testing.T) { testTopQueryReset(t, pre17TestVersion, false) })
+	t.Run("post14", func(t *testing.T) { testTopQueryReset(t, post17TestVersion, true) })
+}
+
+// topQueryHarness is a PostgreSQL container with pg_stat_statements plus
+// helpers to drive the top_query scraper against it.
+type topQueryHarness struct {
+	// cfg is read by newScraper, so a test may change it before creating a scraper.
+	cfg         *Config
+	port        string
+	workload    *sql.DB
+	observed    *observer.ObservedLogs
+	runWorkload func(n int)
+	newScraper  func() *postgreSQLScraper
+	targetCalls func(s *postgreSQLScraper) []int64
+}
+
+func startTopQueryHarness(t *testing.T, pgVersion string, extraArgs ...string) *topQueryHarness {
+	t.Helper()
+	ci, err := testcontainers.GenericContainer(
+		t.Context(),
+		testcontainers.GenericContainerRequest{
+			ContainerRequest: testcontainers.ContainerRequest{
+				Image: fmt.Sprintf("postgres:%s", pgVersion),
+				Env: map[string]string{
+					"POSTGRES_USER":     "root",
+					"POSTGRES_PASSWORD": "otel",
+					"POSTGRES_DB":       "otel",
+				},
+				Files: []testcontainers.ContainerFile{
+					{
+						HostFilePath:      filepath.Join("testdata", "integration", "01-init.sql"),
+						ContainerFilePath: "/docker-entrypoint-initdb.d/01-init.sql",
+						FileMode:          700,
+					},
+					{
+						HostFilePath:      filepath.Join("testdata", "integration", "02-create-extension.sh"),
+						ContainerFilePath: "/docker-entrypoint-initdb.d/02-create-extension.sh",
+						FileMode:          700,
+					},
+				},
+				ExposedPorts: []string{postgresqlPort},
+				Cmd:          append([]string{"-c", "shared_preload_libraries=pg_stat_statements"}, extraArgs...),
+				// See tableCountEquivalenceTest: the second readiness line is the real server.
+				WaitingFor: wait.ForLog("database system is ready to accept connections").
+					WithOccurrence(2).
+					WithStartupTimeout(2 * time.Minute),
+			},
+		},
+	)
+	require.NoError(t, err)
+	testcontainers.CleanupContainer(t, ci)
+	require.NoError(t, ci.Start(t.Context()))
+
+	p, err := ci.MappedPort(t.Context(), postgresqlPort)
+	require.NoError(t, err)
+	workload, err := sql.Open("postgres", fmt.Sprintf("postgres://root:otel@localhost:%s/otel2?sslmode=disable", p.Port()))
+	require.NoError(t, err)
+	t.Cleanup(func() { workload.Close() })
+
+	runWorkload := func(n int) {
+		t.Helper()
+		for range n {
+			_, execErr := workload.ExecContext(t.Context(), "SELECT * FROM test2 WHERE id = 67")
+			require.NoError(t, execErr)
+		}
+	}
+
+	cfg := createDefaultConfig().(*Config)
+	cfg.Databases = []string{"postgres"}
+	cfg.Username = "otelu"
+	cfg.Password = "otelp"
+	cfg.ConnectDatabase = "postgres"
+	cfg.ClientConfig = configtls.ClientConfig{Insecure: true}
+	cfg.AddrConfig = confignet.AddrConfig{Endpoint: net.JoinHostPort("localhost", p.Port())}
+	cfg.LogsBuilderConfig.Events.DbServerTopQuery.Enabled = true
+	cfg.TopQueryCollection.MaxRowsPerQuery = 100
+	cfg.TopQueryCollection.TopNQuery = 100
+	cfg.TopQueryCollection.MaxExplainEachInterval = 0
+
+	core, observed := observer.New(zapcore.DebugLevel)
+	settings := receivertest.NewNopSettings(metadata.Type)
+	settings.Logger = zap.New(core)
+	newScraper := func() *postgreSQLScraper {
+		t.Helper()
+		s, scraperErr := newTopQueryScraper(settings, cfg, newDefaultClientFactory(cfg))
+		require.NoError(t, scraperErr)
+		return s
+	}
+
+	// targetCalls returns the postgresql.calls values emitted for the workload statement.
+	targetCalls := func(s *postgreSQLScraper) []int64 {
+		t.Helper()
+		logs, scrapeErr := s.scrapeTopQuery(t.Context(), cfg.TopQueryCollection.MaxRowsPerQuery, cfg.TopQueryCollection.TopNQuery, cfg.TopQueryCollection.MaxExplainEachInterval, 0)
+		require.NoError(t, scrapeErr)
+		var calls []int64
+		for _, rl := range logs.ResourceLogs().All() {
+			for _, sl := range rl.ScopeLogs().All() {
+				for _, record := range sl.LogRecords().All() {
+					attributes := record.Attributes().AsRaw()
+					query, _ := attributes["db.query.text"].(string)
+					if attributes["db.namespace"] != "otel2" || !strings.HasPrefix(strings.ToLower(query), "select * from test2 where") {
+						continue
+					}
+					calls = append(calls, attributes["postgresql.calls"].(int64))
+				}
+			}
+		}
+		return calls
+	}
+
+	return &topQueryHarness{
+		cfg:         cfg,
+		port:        p.Port(),
+		workload:    workload,
+		observed:    observed,
+		runWorkload: runWorkload,
+		newScraper:  newScraper,
+		targetCalls: targetCalls,
+	}
+}
+
+func testTopQueryReset(t *testing.T, pgVersion string, hasStatStatementsInfo bool) {
+	h := startTopQueryHarness(t, pgVersion)
+	workload, observed, runWorkload, newScraper, targetCalls := h.workload, h.observed, h.runWorkload, h.newScraper, h.targetCalls
+
+	resetStatements := func() {
+		t.Helper()
+		_, resetErr := workload.ExecContext(t.Context(), "SELECT pg_stat_statements_reset()")
+		require.NoError(t, resetErr)
+	}
+
+	if !hasStatStatementsInfo {
+		// Before pg_stat_statements 1.9 an entry is keyed on (userid, dbid, queryid)
+		// only, so the grouped top_query SQL used there is a no-op.
+		runWorkload(1)
+		var splitStatements int
+		require.NoError(t, workload.QueryRowContext(t.Context(), `SELECT count(*) FROM (
+  SELECT 1 FROM pg_stat_statements GROUP BY userid, dbid, queryid HAVING count(*) > 1) split`).Scan(&splitStatements))
+		assert.Zero(t, splitStatements)
+	}
+
+	scraper := newScraper()
+	runWorkload(1000)
+	assert.Empty(t, targetCalls(scraper), "first scrape must seed, not emit the lifetime total")
+	runWorkload(10)
+	assert.Equal(t, []int64{10}, targetCalls(scraper))
+
+	// Reset, then the counter grows past the stale cached value (1010) within one interval.
+	resetStatements()
+	runWorkload(1020)
+	calls := targetCalls(scraper)
+	cacheLogs := observed.FilterMessage("top_query delta cache").AllUntimed()
+	require.NotEmpty(t, cacheLogs)
+	assert.Equal(t, hasStatStatementsInfo, cacheLogs[len(cacheLogs)-1].ContextMap()["stats_reset_detected"],
+		"stats_reset detection must be used exactly when pg_stat_statements_info exists")
+	require.Len(t, calls, 1)
+	if hasStatStatementsInfo {
+		assert.Equal(t, int64(1020), calls[0],
+			"a changed pg_stat_statements_info.stats_reset must report the full post-reset count")
+	} else {
+		// Without pg_stat_statements_info the reset is only visible if some counter
+		// (e.g. total_exec_time) fell below its stale value; otherwise only
+		// current - stale (10) is reported. This undercount is a known limitation.
+		assert.Contains(t, []int64{10, 1020}, calls[0])
+	}
+	runWorkload(3)
+	assert.Equal(t, []int64{3}, targetCalls(scraper))
+
+	// Reset, then the counter stays below the stale cached value (1023).
+	resetStatements()
+	runWorkload(5)
+	assert.Equal(t, []int64{5}, targetCalls(scraper), "after pg_stat_statements_reset() the new counter must be reported, not 0")
+	runWorkload(3)
+	assert.Equal(t, []int64{3}, targetCalls(scraper), "the cache must be re-seeded after a reset")
+
+	// Simulated collector restart: a new scraper starts with an empty cache while
+	// the statement's lifetime total is now well above 1000.
+	runWorkload(1000)
+	restarted := newScraper()
+	assert.Empty(t, targetCalls(restarted), "a restarted collector must seed, not emit the lifetime total")
+	runWorkload(7)
+	assert.Equal(t, []int64{7}, targetCalls(restarted))
+}
+
+// TestIntegrationTopQueryResetToplevel runs with pg_stat_statements.track = 'all':
+// the workload statement then has a top-level and a nested entry with the same
+// (userid, dbid, queryid). They must not reset each other on every scrape and
+// are emitted as one record whose deltas are their sum:
+//   - pg_stat_statements 1.9+: toplevel is selected, per-entry cache keys, merged in the scraper;
+//   - pg_stat_statements 1.8 on PostgreSQL 17 (as after pg_upgrade without
+//     ALTER EXTENSION UPDATE): no toplevel column, entries summed in SQL.
+func TestIntegrationTopQueryResetToplevel(t *testing.T) {
+	t.Run("pgss_latest", func(t *testing.T) { testTopQueryToplevel(t, "") })
+	t.Run("pgss_1_8", func(t *testing.T) { testTopQueryToplevel(t, "1.8") })
+}
+
+func testTopQueryToplevel(t *testing.T, extVersion string) {
+	h := startTopQueryHarness(t, post17TestVersion, "-c", "pg_stat_statements.track=all")
+	connectDB, err := sql.Open("postgres", fmt.Sprintf("postgres://root:otel@localhost:%s/postgres?sslmode=disable", h.port))
+	require.NoError(t, err)
+	t.Cleanup(func() { connectDB.Close() })
+	if extVersion != "" {
+		// The receiver probes and queries the view in its connect database.
+		_, err = connectDB.ExecContext(t.Context(), "DROP EXTENSION pg_stat_statements")
+		require.NoError(t, err)
+		_, err = connectDB.ExecContext(t.Context(), fmt.Sprintf("CREATE EXTENSION pg_stat_statements VERSION '%s'", extVersion))
+		require.NoError(t, err)
+	}
+
+	_, err = h.workload.ExecContext(t.Context(), `CREATE FUNCTION run_target() RETURNS void LANGUAGE plpgsql AS $$
+BEGIN
+  PERFORM * FROM test2 WHERE id = 67;
+END $$`)
+	require.NoError(t, err)
+	runNested := func(n int) {
+		t.Helper()
+		for range n {
+			_, execErr := h.workload.ExecContext(t.Context(), "SELECT run_target()")
+			require.NoError(t, execErr)
+		}
+	}
+
+	h.runWorkload(100)
+	runNested(40)
+
+	// Fixture precondition: a statement has two entries for one (userid, dbid, queryid).
+	var splitStatements int
+	require.NoError(t, connectDB.QueryRowContext(t.Context(), `SELECT count(*) FROM (
+  SELECT 1 FROM pg_stat_statements GROUP BY userid, dbid, queryid HAVING count(*) > 1) split`).Scan(&splitStatements))
+	require.Positive(t, splitStatements, "fixture must produce a top-level and a nested entry for one queryid")
+
+	scraper := h.newScraper()
+	assert.Empty(t, h.targetCalls(scraper), "first scrape seeds both entries")
+	assert.Equal(t, extVersion == "", scraper.toplevelSupported, "toplevel is selected only with pg_stat_statements 1.9+")
+	h.runWorkload(10)
+	runNested(3)
+	assert.Equal(t, []int64{13}, h.targetCalls(scraper), "one record per statement: 10 top-level + 3 nested calls")
+	h.runWorkload(2)
+	runNested(1)
+	assert.Equal(t, []int64{3}, h.targetCalls(scraper))
+
+	cacheLogs := h.observed.FilterMessage("top_query delta cache").AllUntimed()
+	for i := range cacheLogs {
+		fields := cacheLogs[i].ContextMap()
+		assert.Equal(t, int64(0), fields["reset"], "top-level and nested entries must not reset each other")
+		assert.Equal(t, int64(0), fields["duplicated"])
 	}
 }

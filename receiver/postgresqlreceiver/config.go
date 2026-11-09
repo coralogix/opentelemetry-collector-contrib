@@ -38,12 +38,66 @@ const (
 var errQueryPlanWithoutTopQuery = errors.New("`db.server.query_plan` requires `db.server.top_query` to be enabled")
 
 type TopQueryCollection struct {
-	MaxRowsPerQuery        int64         `mapstructure:"max_rows_per_query"`
-	TopNQuery              int64         `mapstructure:"top_n_query"`
-	MaxExplainEachInterval int64         `mapstructure:"max_explain_each_interval"`
-	QueryPlanCacheSize     int           `mapstructure:"query_plan_cache_size"`
-	QueryPlanCacheTTL      time.Duration `mapstructure:"query_plan_cache_ttl"`
-	CollectionInterval     time.Duration `mapstructure:"collection_interval"`
+	MaxRowsPerQuery int64 `mapstructure:"max_rows_per_query"`
+	// CandidateOrder selects which max_rows_per_query statements are fetched
+	// from pg_stat_statements: "calls" (default) takes the most executed ones,
+	// "total_time" the ones with the most total execution time, so a rare slow
+	// statement is not missed.
+	CandidateOrder         TopQueryCandidateOrder `mapstructure:"candidate_order"`
+	TopNQuery              int64                  `mapstructure:"top_n_query"`
+	MaxExplainEachInterval int64                  `mapstructure:"max_explain_each_interval"`
+	QueryPlanCacheSize     int                    `mapstructure:"query_plan_cache_size"`
+	QueryPlanCacheTTL      time.Duration          `mapstructure:"query_plan_cache_ttl"`
+	CollectionInterval     time.Duration          `mapstructure:"collection_interval"`
+	// Temporality selects how db.server.top_query reports statement counters:
+	// "delta" (default) reports per-interval deltas computed in the receiver;
+	// "cumulative" reports the raw pg_stat_statements counters of every fetched
+	// statement with postgresql.start_time and postgresql.toplevel, so a
+	// downstream consumer computes the deltas.
+	Temporality TopQueryTemporality `mapstructure:"temporality"`
+	// prevent unkeyed literal initialization
+	_ struct{}
+}
+
+// TopQueryTemporality is the aggregation temporality of top_query counters.
+type TopQueryTemporality string
+
+const (
+	TopQueryTemporalityDelta      TopQueryTemporality = "delta"
+	TopQueryTemporalityCumulative TopQueryTemporality = "cumulative"
+)
+
+// TopQueryCandidateOrder is the pg_stat_statements order of the top_query candidates.
+type TopQueryCandidateOrder string
+
+const (
+	TopQueryCandidateOrderCalls     TopQueryCandidateOrder = "calls"
+	TopQueryCandidateOrderTotalTime TopQueryCandidateOrder = "total_time"
+)
+
+// column is the pg_stat_statements column to order by; "" for an invalid value.
+// An unset order means calls. The template only ever receives one of these
+// fixed names.
+func (o TopQueryCandidateOrder) column() string {
+	switch o {
+	case "", TopQueryCandidateOrderCalls:
+		return "calls"
+	case TopQueryCandidateOrderTotalTime:
+		return "total_exec_time"
+	default:
+		return ""
+	}
+}
+
+// DBMConfig holds Coralogix Database Monitoring (DBM) options.
+type DBMConfig struct {
+	// AllowLiteralCapture adds the un-obfuscated statement text to each
+	// db.server.query_sample record as db.query.text.raw. Default false.
+	// The receiver applies no redaction to it: the DBM edge processor
+	// (dbmprocessor) runs the credential rule and deletes the attribute
+	// unless a Full capture lease applies, so it must run in every pipeline
+	// that receives these records.
+	AllowLiteralCapture bool `mapstructure:"allow_literal_capture"`
 	// prevent unkeyed literal initialization
 	_ struct{}
 }
@@ -71,6 +125,8 @@ type Config struct {
 	LogsBuilderConfig     metadata.LogsBuilderConfig    `mapstructure:",squash"`
 	QuerySampleCollection QuerySampleCollection         `mapstructure:"query_sample_collection,omitempty"`
 	TopQueryCollection    TopQueryCollection            `mapstructure:"top_query_collection,omitempty"`
+	// DBM holds Coralogix Database Monitoring options.
+	DBM DBMConfig `mapstructure:"dbm,omitempty"`
 	// DBAuth optionally sources the connection credential from a db_auth provider
 	// extension (e.g. AWS IAM) instead of a static password. When set, the provider
 	// supplies the password at connection-open time. Mutually exclusive with the
@@ -133,8 +189,20 @@ func (cfg *Config) Validate() error {
 		err = multierr.Append(err, errors.New(ErrTransportsSupported))
 	}
 
+	if cfg.TopQueryCollection.CandidateOrder.column() == "" {
+		err = multierr.Append(err, fmt.Errorf("invalid config: 'top_query_collection.candidate_order' must be %q or %q, got %q",
+			TopQueryCandidateOrderCalls, TopQueryCandidateOrderTotalTime, cfg.TopQueryCollection.CandidateOrder))
+	}
+
 	if cfg.LogsBuilderConfig.Events.DbServerQueryPlan.Enabled && !cfg.LogsBuilderConfig.Events.DbServerTopQuery.Enabled {
 		err = multierr.Append(err, errQueryPlanWithoutTopQuery)
+	}
+
+	switch cfg.TopQueryCollection.Temporality {
+	case "", TopQueryTemporalityDelta, TopQueryTemporalityCumulative: // "" = delta
+	default:
+		err = multierr.Append(err, fmt.Errorf("invalid config: 'top_query_collection.temporality' must be %q or %q, got %q",
+			TopQueryTemporalityDelta, TopQueryTemporalityCumulative, cfg.TopQueryCollection.Temporality))
 	}
 
 	return err

@@ -25,7 +25,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/tj/assert"
-	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/config/confignet"
 	"go.opentelemetry.io/collector/pdata/pcommon"
@@ -726,6 +725,22 @@ var querySampleColumns = []string{
 
 // newSQLMockRows builds a one-row sqlmock result in the given column order,
 // filling any column missing from values with an empty string.
+// primeTopQueryCache marks a statement's counters as already seen (at 0) so the
+// next scrape reports a steady-state interval delta. A cold cache now seeds and
+// reports nothing on the first scrape, so tests asserting emitted records must
+// prime the cache first.
+func primeTopQueryCache(scraper *postgreSQLScraper, database, userid, queryid string) {
+	counters := statementCounters{}
+	for _, column := range []string{
+		totalExecTimeColumnName, totalPlanTimeColumnName, rowsColumnName, callsColumnName,
+		sharedBlksDirtiedColumnName, sharedBlksHitColumnName, sharedBlksReadColumnName,
+		sharedBlksWrittenColumnName, tempBlksReadColumnName, tempBlksWrittenColumnName,
+	} {
+		counters[column] = 0
+	}
+	scraper.cache.add(database+"\x00"+userid+"\x00"+queryid, counters)
+}
+
 func newSQLMockRows(columns []string, values map[string]any) *sqlmock.Rows {
 	rowValues := make([]driver.Value, len(columns))
 	for i, col := range columns {
@@ -773,9 +788,7 @@ func TestScrapeQuerySample(t *testing.T) {
 	settings := receivertest.NewNopSettings(metadata.Type)
 	logger, err := zap.NewProduction()
 	assert.NoError(t, err)
-	settings.TelemetrySettings = component.TelemetrySettings{
-		Logger: logger,
-	}
+	settings.Logger = logger
 	scraper, scraperErr := newPostgreSQLScraper(settings, cfg, factory, newCache(1), newTTLCache[string](1, time.Second))
 	require.NoError(t, scraperErr)
 	scraper.newestQueryTimestamp = 123440.111
@@ -821,7 +834,7 @@ func TestScrapeQuerySampleSemconv(t *testing.T) {
 	settings := receivertest.NewNopSettings(metadata.Type)
 	logger, err := zap.NewProduction()
 	require.NoError(t, err)
-	settings.TelemetrySettings = component.TelemetrySettings{Logger: logger}
+	settings.Logger = logger
 
 	scraper, scraperErr := newPostgreSQLScraper(settings, cfg, factory, newCache(1), newTTLCache[string](1, time.Second))
 	require.NoError(t, scraperErr)
@@ -874,9 +887,7 @@ func TestScrapeQuerySampleWithTraceparent(t *testing.T) {
 	settings := receivertest.NewNopSettings(metadata.Type)
 	logger, err := zap.NewProduction()
 	require.NoError(t, err)
-	settings.TelemetrySettings = component.TelemetrySettings{
-		Logger: logger,
-	}
+	settings.Logger = logger
 
 	scraper, scraperErr := newPostgreSQLScraper(settings, cfg, factory, newCache(1), newTTLCache[string](1, time.Second))
 	require.NoError(t, scraperErr)
@@ -988,6 +999,8 @@ func TestTopQueryTemplateRendering(t *testing.T) {
 	tests := []struct {
 		name           string
 		excludes       []string
+		toplevel       bool
+		statsSince     bool
 		expectedClause string
 	}{
 		{
@@ -999,6 +1012,19 @@ func TestTopQueryTemplateRendering(t *testing.T) {
 			excludes:       []string{"rdsadmin", "azure_maintenance"},
 			expectedClause: "AND datname NOT IN ('rdsadmin','azure_maintenance')",
 		},
+		{
+			// pg_stat_statements 1.9+ (PostgreSQL 14+) keys entries on toplevel too.
+			name:           "toplevel is selected when supported",
+			toplevel:       true,
+			expectedClause: "total_plan_time,\n  toplevel::TEXT\nFROM",
+		},
+		{
+			// Cumulative mode on pg_stat_statements 1.11+ (PostgreSQL 17+) adds the per-entry start time.
+			name:           "stats_since is selected for cumulative mode",
+			toplevel:       true,
+			statsSince:     true,
+			expectedClause: "toplevel::TEXT,\n  (EXTRACT(EPOCH FROM stats_since) * 1000000)::BIGINT::TEXT AS stats_since\nFROM",
+		},
 	}
 
 	for _, tc := range tests {
@@ -1007,11 +1033,27 @@ func TestTopQueryTemplateRendering(t *testing.T) {
 			err := tmpl.Execute(&buf, map[string]any{
 				"limit":             int64(10),
 				"excludedDatabases": quoteDatabaseList(tc.excludes),
+				"toplevel":          tc.toplevel,
+				"statsSince":        tc.statsSince,
+				"orderBy":           "calls",
 			})
 			require.NoError(t, err)
 
 			rendered := buf.String()
 			assert.Contains(t, rendered, "LIMIT 10;")
+			if tc.toplevel {
+				// Per-entry rows: the scraper keys on toplevel and merges the entries.
+				assert.NotContains(t, rendered, "GROUP BY")
+			} else {
+				// Without toplevel, entries that share (userid, dbid, queryid) are summed
+				// server side, before ORDER BY/LIMIT, so LIMIT applies to whole statements
+				// and the sum does not depend on row order.
+				assert.NotContains(t, rendered, "toplevel", "no toplevel column before pg_stat_statements 1.9")
+				assert.Contains(t, rendered, "SUM(calls) AS calls,")
+				assert.Contains(t, rendered, "SUM(total_exec_time) AS total_exec_time,")
+				assert.Contains(t, rendered, "MAX(query) AS query,")
+				assert.Contains(t, rendered, "GROUP BY pg_stat_statements.userid, pg_stat_statements.dbid, pg_stat_statements.queryid, datname, rolname\nORDER BY calls DESC")
+			}
 
 			if tc.expectedClause == "" {
 				assert.NotContains(t, rendered, "datname NOT IN (", "no database filter should be emitted without excludes")
@@ -1036,7 +1078,7 @@ func TestScrapeQuerySampleNoResults(t *testing.T) {
 	settings := receivertest.NewNopSettings(metadata.Type)
 	logger, err := zap.NewProduction()
 	require.NoError(t, err)
-	settings.TelemetrySettings = component.TelemetrySettings{Logger: logger}
+	settings.Logger = logger
 
 	scraper, scraperErr := newPostgreSQLScraper(settings, cfg, factory, newCache(1), newTTLCache[string](1, time.Second))
 	require.NoError(t, scraperErr)
@@ -1071,7 +1113,7 @@ func TestScrapeQuerySampleMultipleRows(t *testing.T) {
 	settings := receivertest.NewNopSettings(metadata.Type)
 	logger, err := zap.NewProduction()
 	require.NoError(t, err)
-	settings.TelemetrySettings = component.TelemetrySettings{Logger: logger}
+	settings.Logger = logger
 
 	scraper, scraperErr := newPostgreSQLScraper(settings, cfg, factory, newCache(1), newTTLCache[string](1, time.Second))
 	require.NoError(t, scraperErr)
@@ -1146,7 +1188,7 @@ func TestScrapeQuerySampleBlockedSession(t *testing.T) {
 	settings := receivertest.NewNopSettings(metadata.Type)
 	logger, err := zap.NewProduction()
 	require.NoError(t, err)
-	settings.TelemetrySettings = component.TelemetrySettings{Logger: logger}
+	settings.Logger = logger
 
 	scraper, scraperErr := newPostgreSQLScraper(settings, cfg, factory, newCache(1), newTTLCache[string](1, time.Second))
 	require.NoError(t, scraperErr)
@@ -1202,7 +1244,7 @@ func TestScrapeQuerySampleMultiBlocker(t *testing.T) {
 	settings := receivertest.NewNopSettings(metadata.Type)
 	logger, err := zap.NewProduction()
 	require.NoError(t, err)
-	settings.TelemetrySettings = component.TelemetrySettings{Logger: logger}
+	settings.Logger = logger
 
 	scraper, scraperErr := newPostgreSQLScraper(settings, cfg, factory, newCache(1), newTTLCache[string](1, time.Second))
 	require.NoError(t, scraperErr)
@@ -1264,7 +1306,7 @@ func TestScrapeTopQueriesHonorsExcludeDatabases(t *testing.T) {
 			settings := receivertest.NewNopSettings(metadata.Type)
 			logger, err := zap.NewProduction()
 			require.NoError(t, err)
-			settings.TelemetrySettings = component.TelemetrySettings{Logger: logger}
+			settings.Logger = logger
 
 			factory := &recordingClientFactory{mockSimpleClientFactory: mockSimpleClientFactory{db: db}}
 			scraper, err := newPostgreSQLScraper(settings, cfg, factory, newCache(30), newTTLCache[string](1, time.Second))
@@ -1313,7 +1355,7 @@ func TestScrapeQuerySamplesHonorsConnectDatabase(t *testing.T) {
 	settings := receivertest.NewNopSettings(metadata.Type)
 	logger, err := zap.NewProduction()
 	require.NoError(t, err)
-	settings.TelemetrySettings = component.TelemetrySettings{Logger: logger}
+	settings.Logger = logger
 
 	factory := &recordingClientFactory{mockSimpleClientFactory: mockSimpleClientFactory{db: db}}
 	scraper, err := newPostgreSQLScraper(settings, cfg, factory, newCache(30), newTTLCache[string](1, time.Second))
@@ -1344,7 +1386,7 @@ func TestScrapeTopQueryHonorsConnectDatabase(t *testing.T) {
 	settings := receivertest.NewNopSettings(metadata.Type)
 	logger, err := zap.NewProduction()
 	require.NoError(t, err)
-	settings.TelemetrySettings = component.TelemetrySettings{Logger: logger}
+	settings.Logger = logger
 
 	factory := &recordingClientFactory{mockSimpleClientFactory: mockSimpleClientFactory{db: db}}
 	scraper, err := newPostgreSQLScraper(settings, cfg, factory, newCache(30), newTTLCache[string](1, time.Second))
@@ -1414,7 +1456,7 @@ func TestScrapeQuerySamplesHonorsExcludeDatabases(t *testing.T) {
 	settings := receivertest.NewNopSettings(metadata.Type)
 	logger, err := zap.NewProduction()
 	require.NoError(t, err)
-	settings.TelemetrySettings = component.TelemetrySettings{Logger: logger}
+	settings.Logger = logger
 
 	scraper, err := newPostgreSQLScraper(settings, cfg, mockSimpleClientFactory{db: db}, newCache(30), newTTLCache[string](1, time.Second))
 	require.NoError(t, err)
@@ -1451,25 +1493,24 @@ func TestScrapeTopQueries(t *testing.T) {
 	settings := receivertest.NewNopSettings(metadata.Type)
 	logger, err := zap.NewProduction()
 	assert.NoError(t, err)
-	settings.TelemetrySettings = component.TelemetrySettings{
-		Logger: logger,
-	}
+	settings.Logger = logger
 
 	queryid := "114514"
 	scraper, scraperErr := newPostgreSQLScraper(settings, cfg, factory, newCache(30), newTTLCache[string](1, time.Second))
 	require.NoError(t, scraperErr)
-	cacheKeyPrefix := "postgres\x0016415\x00" + queryid + "\x00"
-	scraper.cache.Add(cacheKeyPrefix+totalExecTimeColumnName, 10)
-	scraper.cache.Add(cacheKeyPrefix+totalPlanTimeColumnName, 11)
-	scraper.cache.Add(cacheKeyPrefix+callsColumnName, 120)
-	scraper.cache.Add(cacheKeyPrefix+rowsColumnName, 20)
-
-	scraper.cache.Add(cacheKeyPrefix+sharedBlksDirtiedColumnName, 1110)
-	scraper.cache.Add(cacheKeyPrefix+sharedBlksHitColumnName, 1110)
-	scraper.cache.Add(cacheKeyPrefix+sharedBlksReadColumnName, 1110)
-	scraper.cache.Add(cacheKeyPrefix+sharedBlksWrittenColumnName, 1110)
-	scraper.cache.Add(cacheKeyPrefix+tempBlksReadColumnName, 1110)
-	scraper.cache.Add(cacheKeyPrefix+tempBlksWrittenColumnName, 1110)
+	cacheKey := "postgres\x0016415\x00" + queryid
+	scraper.cache.add(cacheKey, statementCounters{
+		totalExecTimeColumnName:     10,
+		totalPlanTimeColumnName:     11,
+		callsColumnName:             120,
+		rowsColumnName:              20,
+		sharedBlksDirtiedColumnName: 1110,
+		sharedBlksHitColumnName:     1110,
+		sharedBlksReadColumnName:    1110,
+		sharedBlksWrittenColumnName: 1110,
+		tempBlksReadColumnName:      1110,
+		tempBlksWrittenColumnName:   1110,
+	})
 
 	mock.ExpectQuery(expectedScrapeTopQuery).WillReturnRows(newSQLMockRows(topQueryColumns, map[string]any{
 		callsColumnName:             "123",
@@ -1504,15 +1545,11 @@ func TestScrapeTopQueries(t *testing.T) {
 
 	// Verify the cache has updated with latest counter
 
-	calls, callsExists := scraper.cache.Get(cacheKeyPrefix + callsColumnName)
-	assert.True(t, callsExists)
-	assert.Equal(t, float64(123), calls)
-	execTime, execTimeExists := scraper.cache.Get(cacheKeyPrefix + totalExecTimeColumnName)
-	assert.True(t, execTimeExists)
-	assert.Equal(t, float64(11), execTime)
-	planTime, planTimeExists := scraper.cache.Get(cacheKeyPrefix + totalPlanTimeColumnName)
-	assert.True(t, planTimeExists)
-	assert.Equal(t, float64(12), planTime)
+	cached, cachedExists := scraper.cache.get(cacheKey)
+	require.True(t, cachedExists)
+	assert.Equal(t, float64(123), cached[callsColumnName])
+	assert.Equal(t, float64(11), cached[totalExecTimeColumnName])
+	assert.Equal(t, float64(12), cached[totalPlanTimeColumnName])
 }
 
 // TestScrapeTopQueriesDbServerQueryPlanEvent covers both sides of the db.server.query_plan switch.
@@ -1530,7 +1567,7 @@ func TestScrapeTopQueriesDbServerQueryPlanEvent(t *testing.T) {
 		settings := receivertest.NewNopSettings(metadata.Type)
 		logger, err := zap.NewProduction()
 		require.NoError(t, err)
-		settings.TelemetrySettings = component.TelemetrySettings{Logger: logger}
+		settings.Logger = logger
 
 		scraper, scraperErr := newPostgreSQLScraper(settings, cfg, mockSimpleClientFactory{db: db}, newCache(30), newTTLCache[string](1, time.Second))
 		require.NoError(t, scraperErr)
@@ -1539,6 +1576,7 @@ func TestScrapeTopQueriesDbServerQueryPlanEvent(t *testing.T) {
 
 	t.Run("disabled keeps the plan on db.server.top_query", func(t *testing.T) {
 		scraper, mock := newScraper(t, true, false)
+		primeTopQueryCache(scraper, "postgres", "16415", "114514")
 
 		mock.ExpectQuery(expectedScrapeTopQuery).WillReturnRows(newSQLMockRows(topQueryColumns, map[string]any{
 			callsColumnName:             "123",
@@ -1575,6 +1613,7 @@ func TestScrapeTopQueriesDbServerQueryPlanEvent(t *testing.T) {
 
 	t.Run("enabled moves the plan to db.server.query_plan", func(t *testing.T) {
 		scraper, mock := newScraper(t, true, true)
+		primeTopQueryCache(scraper, "postgres", "16415", "114514")
 
 		mock.ExpectQuery(expectedScrapeTopQuery).WillReturnRows(newSQLMockRows(topQueryColumns, map[string]any{
 			callsColumnName:             "123",
@@ -1631,6 +1670,7 @@ func TestScrapeTopQueriesDbServerQueryPlanEvent(t *testing.T) {
 
 	t.Run("enabled without db.server.top_query collects nothing", func(t *testing.T) {
 		scraper, mock := newScraper(t, false, true)
+		primeTopQueryCache(scraper, "postgres", "16415", "114514")
 
 		mock.ExpectQuery(expectedScrapeTopQuery).WillReturnRows(newSQLMockRows(topQueryColumns, map[string]any{
 			callsColumnName:             "123",
@@ -1663,6 +1703,8 @@ func TestScrapeTopQueriesDbServerQueryPlanEvent(t *testing.T) {
 	// Two roles running the same statement in the same database share (queryid, db.namespace).
 	t.Run("two roles sharing a queryid get distinct db.server.query_plan records", func(t *testing.T) {
 		scraper, mock := newScraper(t, true, true)
+		primeTopQueryCache(scraper, "postgres", "16415", "114514")
+		primeTopQueryCache(scraper, "postgres", "16416", "114514")
 
 		rows := sqlmock.NewRows(topQueryColumns).
 			AddRow("100", "postgres", "1111", "1112", "1113", "1114", "1115", "1116",
@@ -1715,6 +1757,8 @@ func TestScrapeTopQueriesDbServerQueryPlanEvent(t *testing.T) {
 	// tells them apart.
 	t.Run("two dropped roles sharing a queryid stay distinct via userid", func(t *testing.T) {
 		scraper, mock := newScraper(t, true, true)
+		primeTopQueryCache(scraper, "postgres", "16415", "114514")
+		primeTopQueryCache(scraper, "postgres", "16416", "114514")
 
 		rows := sqlmock.NewRows(topQueryColumns).
 			AddRow("100", "postgres", "1111", "1112", "1113", "1114", "1115", "1116",
@@ -1758,6 +1802,7 @@ func TestScrapeTopQueriesDbServerQueryPlanEvent(t *testing.T) {
 
 	t.Run("no plan available yields db.server.top_query only", func(t *testing.T) {
 		scraper, mock := newScraper(t, true, true)
+		primeTopQueryCache(scraper, "postgres", "16415", "114514")
 
 		// A non-explainable query (GRANT is not in the EXPLAIN whitelist) so
 		// explainQuery short-circuits to ("", nil) without issuing EXPLAIN.
@@ -1805,7 +1850,7 @@ func TestScrapeTopQueriesSkipsNilDatabase(t *testing.T) {
 	settings := receivertest.NewNopSettings(metadata.Type)
 	logger, err := zap.NewProduction()
 	require.NoError(t, err)
-	settings.TelemetrySettings = component.TelemetrySettings{Logger: logger}
+	settings.Logger = logger
 
 	scraper, scraperErr := newPostgreSQLScraper(settings, cfg, factory, newCache(30), newTTLCache[string](1, time.Second))
 	require.NoError(t, scraperErr)
@@ -1913,9 +1958,7 @@ func TestScrapeTopQueriesCollectsOnlyWhenIntervalHasElapsed(t *testing.T) {
 	settings := receivertest.NewNopSettings(metadata.Type)
 	logger, err := zap.NewProduction()
 	assert.NoError(t, err)
-	settings.TelemetrySettings = component.TelemetrySettings{
-		Logger: logger,
-	}
+	settings.Logger = logger
 
 	scraper, scraperErr := newPostgreSQLScraper(settings, cfg, factory, newCache(30), newTTLCache[string](1, time.Second))
 	require.NoError(t, scraperErr)
@@ -2347,7 +2390,15 @@ func (*mockClient) explainQuery(context.Context, string, string, *zap.Logger) (s
 }
 
 // getTopQuery implements client.
-func (*mockClient) getTopQuery(context.Context, int64, []string, *zap.Logger) ([]map[string]any, error) {
+func (*mockClient) getStatStatementsCapabilities(context.Context) (int64, string, error) {
+	return 0, "", nil
+}
+
+func (*mockClient) getStatStatementsInfo(context.Context) (statStatementsInfo, error) {
+	return statStatementsInfo{}, nil
+}
+
+func (*mockClient) getTopQuery(context.Context, int64, []string, bool, bool, TopQueryCandidateOrder, *zap.Logger) ([]map[string]any, error) {
 	panic("unimplemented")
 }
 

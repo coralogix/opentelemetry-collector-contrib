@@ -2,7 +2,6 @@ cmd/codecovgen
 pkg/golden
 pkg/pdatatest
 cmd/golden
-confmap/provider/s3provider
 extension/internal/basicauth
 extension/internal/credentialsfile
 extension/internal/secretprovider
@@ -69,6 +68,7 @@ receiver/stefreceiver
 receiver/syslogreceiver
 testbed/mockdatasenders/mockdatadogagentexporter
 testbed
+confmap/provider/s3provider
 cmd/opampsupervisor
 cmd/telemetrygen
 cmd/telemetrygen/internal/e2etest

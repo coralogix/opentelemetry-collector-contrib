@@ -79,7 +79,13 @@ type client interface {
 	listDatabases(ctx context.Context) ([]string, error)
 	getVersion(ctx context.Context) (string, error)
 	getQuerySamples(ctx context.Context, limit int64, newestQueryTimestamp float64, excludedDatabases []string, logger *zap.Logger) ([]map[string]any, float64, error)
-	getTopQuery(ctx context.Context, limit int64, excludedDatabases []string, logger *zap.Logger) ([]map[string]any, error)
+	// toplevel selects pg_stat_statements.toplevel (pg_stat_statements 1.9+, PostgreSQL 14+).
+	// statsSince selects pg_stat_statements.stats_since as epoch microseconds
+	// (pg_stat_statements 1.11+, PostgreSQL 17+); it requires toplevel.
+	// order selects the pg_stat_statements column the candidates are ordered by.
+	getTopQuery(ctx context.Context, limit int64, excludedDatabases []string, toplevel, statsSince bool, order TopQueryCandidateOrder, logger *zap.Logger) ([]map[string]any, error)
+	getStatStatementsInfo(ctx context.Context) (statStatementsInfo, error)
+	getStatStatementsCapabilities(ctx context.Context) (serverVersionNum int64, extVersion string, err error)
 	explainQuery(ctx context.Context, query, queryID string, logger *zap.Logger) (string, error)
 }
 
@@ -1631,6 +1637,9 @@ func (c *postgreSQLClient) getQuerySamples(ctx context.Context, limit int64, new
 		currentAttributes[string(conventions.NetworkPeerPortKey)] = clientPort
 		currentAttributes[string(conventions.NetworkPeerAddressKey)] = row[querySampleColumnClientAddr]
 		currentAttributes[string(conventions.DBQueryTextKey)] = obfuscated
+		// Internal only: the scraper emits it as db.query.text.raw when
+		// dbm.allow_literal_capture is true. [DBM P5]
+		currentAttributes[querySampleRawTextKey] = row[querySampleColumnQuery]
 		currentAttributes[string(conventions.DBNamespaceKey)] = row[querySampleColumnDatname]
 		currentAttributes[string(conventions.UserNameKey)] = row[querySampleColumnUsename]
 		currentAttributes[postgresqlTotalExecTimeAttributeName] = duration
@@ -1670,9 +1679,78 @@ var topQueryTemplate string
 
 var topQueryTmpl = template.Must(template.New("topQuery").Option("missingkey=error").Parse(topQueryTemplate))
 
+// statStatementsInfo is the single row of pg_stat_statements_info.
+type statStatementsInfo struct {
+	// dealloc is the number of times pg_stat_statements entries were deallocated
+	// because more distinct statements than pg_stat_statements.max were observed.
+	dealloc int64
+	// statsReset is when all pg_stat_statements statistics were last reset.
+	statsReset sql.NullTime
+}
+
+const statStatementsInfoQuery = "/* otel-collector-ignore */ SELECT dealloc, stats_reset FROM pg_stat_statements_info;"
+
+// getStatStatementsInfo reads pg_stat_statements_info (PostgreSQL 14+, pg_stat_statements 1.9+).
+func (c *postgreSQLClient) getStatStatementsInfo(ctx context.Context) (statStatementsInfo, error) {
+	var info statStatementsInfo
+	if err := c.client.QueryRowContext(ctx, statStatementsInfoQuery).Scan(&info.dealloc, &info.statsReset); err != nil {
+		return statStatementsInfo{}, err
+	}
+	return info, nil
+}
+
+const statStatementsCapabilitiesQuery = "/* otel-collector-ignore */ SELECT current_setting('server_version_num')::bigint AS server_version_num, " +
+	"COALESCE((SELECT extversion FROM pg_extension WHERE extname = 'pg_stat_statements'), '') AS extversion;"
+
+// getStatStatementsCapabilities returns server_version_num and the installed
+// pg_stat_statements extension version ("" when not installed in this database).
+func (c *postgreSQLClient) getStatStatementsCapabilities(ctx context.Context) (int64, string, error) {
+	var serverVersionNum int64
+	var extVersion string
+	if err := c.client.QueryRowContext(ctx, statStatementsCapabilitiesQuery).Scan(&serverVersionNum, &extVersion); err != nil {
+		return 0, "", err
+	}
+	return serverVersionNum, extVersion, nil
+}
+
+// extVersionAtLeast reports whether an extension version such as "1.10" is at
+// least major.minor.
+func extVersionAtLeast(version string, major, minor int) bool {
+	parts := strings.SplitN(version, ".", 3)
+	if len(parts) < 2 {
+		return false
+	}
+	gotMajor, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return false
+	}
+	gotMinor, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return false
+	}
+	return gotMajor > major || (gotMajor == major && gotMinor >= minor)
+}
+
+// isUndefinedColumn reports whether err is PostgreSQL's undefined_column (42703).
+func isUndefinedColumn(err error) bool {
+	var pqErr *pq.Error
+	return errors.As(err, &pqErr) && pqErr.Code == "42703"
+}
+
+// isUndefinedTable reports whether err is PostgreSQL's undefined_table (42P01).
+func isUndefinedTable(err error) bool {
+	var pqErr *pq.Error
+	return errors.As(err, &pqErr) && pqErr.Code == "42P01"
+}
+
 // getTopQuery implements client.
-func (c *postgreSQLClient) getTopQuery(ctx context.Context, limit int64, excludedDatabases []string, logger *zap.Logger) ([]map[string]any, error) {
+func (c *postgreSQLClient) getTopQuery(ctx context.Context, limit int64, excludedDatabases []string, toplevel, statsSince bool, order TopQueryCandidateOrder, logger *zap.Logger) ([]map[string]any, error) {
 	buf := bytes.Buffer{}
+	orderBy := order.column()
+	if orderBy == "" {
+		// Validate rejects such a value; never pass unknown text to the SQL.
+		return []map[string]any{}, fmt.Errorf("invalid top_query candidate order %q", order)
+	}
 
 	// TODO: Only get query after the oldest query we got from the previous sample query colelction.
 	// For instance, if from the last sample query we got queries executed between 8:00 ~ 8:15,
@@ -1680,6 +1758,9 @@ func (c *postgreSQLClient) getTopQuery(ctx context.Context, limit int64, exclude
 	if err := topQueryTmpl.Execute(&buf, map[string]any{
 		"limit":             limit,
 		"excludedDatabases": quoteDatabaseList(excludedDatabases),
+		"toplevel":          toplevel,
+		"statsSince":        toplevel && statsSince,
+		"orderBy":           orderBy,
 	}); err != nil {
 		logger.Error("failed to execute template", zap.Error(err))
 		return []map[string]any{}, fmt.Errorf("failed executing template: %w", err)
