@@ -4,6 +4,7 @@
 package sqlqueryreceiver // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/sqlqueryreceiver"
 
 import (
+	"errors"
 	"time"
 
 	"go.opentelemetry.io/collector/component"
@@ -23,6 +24,15 @@ type Config struct {
 
 	// prevent unkeyed literal initialization
 	_ struct{}
+}
+
+// Validate rejects a negative max_idle_conn (DBM P6). The embedded
+// sqlquery.Config is validated on its own.
+func (c *Config) Validate() error {
+	if c.MaxIdleConn != nil && *c.MaxIdleConn < 0 {
+		return errors.New("max_idle_conn must be unset or >= 0")
+	}
+	return nil
 }
 
 func createDefaultConfig() component.Config {
