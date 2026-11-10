@@ -22,6 +22,7 @@ import (
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/sqlquery"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/adapter"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/sqlqueryreceiver/internal"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/sqlqueryreceiver/internal/metadata"
 )
 
@@ -29,6 +30,8 @@ type logsReceiver struct {
 	config           *Config
 	settings         receiver.Settings
 	createConnection sqlquery.DbProviderFunc
+	sqlOpener        sqlquery.SQLOpenerFunc
+	dataSource       string
 	createClient     sqlquery.ClientProviderFunc
 	queryReceivers   []*logsQueryReceiver
 	nextConsumer     consumer.Logs
@@ -73,6 +76,8 @@ func newLogsReceiver(
 		createConnection: func() (*sql.DB, error) {
 			return sqlOpenerFunc(config.Config.Driver, dataSource)
 		},
+		sqlOpener:         sqlOpenerFunc,
+		dataSource:        dataSource,
 		createClient:      createClient,
 		nextConsumer:      nextConsumer,
 		shutdownRequested: make(chan struct{}),
@@ -96,6 +101,14 @@ func (receiver *logsReceiver) Start(ctx context.Context, host component.Host) er
 	receiver.storageClient, err = adapter.GetStorageClient(ctx, host, receiver.config.Config.StorageID, receiver.settings.ID)
 	if err != nil {
 		return fmt.Errorf("error connecting to storage: %w", err)
+	}
+
+	if receiver.config.MaxOpenConn > 0 || receiver.config.MaxIdleConn != nil {
+		// DBM P6: the queries share one pool, bounded by max_open_conn and
+		// max_idle_conn, as in the metrics receiver.
+		pool := internal.NewPool(receiver.sqlOpener, receiver.config.Config.Driver, receiver.dataSource,
+			receiver.config.MaxOpenConn, receiver.config.MaxIdleConn)
+		receiver.createConnection = pool.DB
 	}
 
 	err = receiver.createQueryReceivers()

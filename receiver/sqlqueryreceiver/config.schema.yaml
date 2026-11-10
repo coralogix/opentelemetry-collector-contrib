@@ -1,5 +1,9 @@
 type: object
 properties:
+  max_idle_conn:
+    description: MaxIdleConn caps the idle connections the pool keeps between collections (database/sql SetMaxIdleConns). Unset keeps the database/sql default; 0 keeps none.
+    x-pointer: true
+    type: integer
   max_open_conn:
     description: The maximumn number of open connections to the sql server. <= 0 means unlimited
     type: integer

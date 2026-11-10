@@ -21,13 +21,17 @@ import (
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/sqlquery"
 )
 
-func NewPool(opener sqlquery.SQLOpenerFunc, driver, dsn string, maxOpenConns int) interface {
+// NewPool returns a lazily opened pool. maxOpenConns <= 0 is unlimited;
+// maxIdleConns nil keeps the database/sql default, 0 keeps no idle
+// connection (DBM P6). A failed open is not cached; the next DB call retries.
+func NewPool(opener sqlquery.SQLOpenerFunc, driver, dsn string, maxOpenConns int, maxIdleConns *int) interface {
 	DB() (*sql.DB, error)
 } {
 	return &sqlPool{
 		DriverName:     driver,
 		DataSourceName: dsn,
 		MaxOpenConns:   maxOpenConns,
+		MaxIdleConns:   maxIdleConns,
 		Opener:         opener,
 	}
 }
@@ -36,6 +40,7 @@ type sqlPool struct {
 	DriverName     string
 	DataSourceName string
 	MaxOpenConns   int
+	MaxIdleConns   *int
 	Opener         sqlquery.SQLOpenerFunc
 
 	mutex sync.Mutex
@@ -56,6 +61,9 @@ func (sp *sqlPool) DB() (*sql.DB, error) {
 
 		if err == nil && db != nil {
 			db.SetMaxOpenConns(sp.MaxOpenConns)
+			if sp.MaxIdleConns != nil {
+				db.SetMaxIdleConns(*sp.MaxIdleConns)
+			}
 			sp.db = db
 		}
 
