@@ -90,7 +90,7 @@ func (counterDriver) Open(dsn string) (driver.Conn, error) {
 // startCountedLogsReceiver starts a logs receiver with three queries on a
 // fresh connCounter and returns the receiver, the counter and the number of
 // sql.Open calls.
-func startCountedLogsReceiver(t *testing.T, maxOpenConn int) (*logsReceiver, *connCounter, *atomic.Int64) {
+func startCountedLogsReceiver(t *testing.T, maxOpenConn int, maxIdleConn *int) (*logsReceiver, *connCounter, *atomic.Int64) {
 	t.Helper()
 	registerCounter.Do(func() { sql.Register("dbmp6counter", counterDriver{}) })
 	c := &connCounter{}
@@ -115,6 +115,7 @@ func startCountedLogsReceiver(t *testing.T, maxOpenConn int) (*logsReceiver, *co
 				Queries:          queries,
 			},
 			MaxOpenConn: maxOpenConn,
+			MaxIdleConn: maxIdleConn,
 		},
 		&consumertest.LogsSink{},
 	)
@@ -124,31 +125,57 @@ func startCountedLogsReceiver(t *testing.T, maxOpenConn int) (*logsReceiver, *co
 	return r.(*logsReceiver), c, opens
 }
 
-// TestLogsReceiver_MaxOpenConnBoundsTheReceiver (DBM P6): with max_open_conn
-// set, the queries of a logs receiver share one pool of at most that many
-// connections, and no connection stays open between collections.
+// TestLogsReceiver_MaxOpenConnBoundsTheReceiver (DBM P6, bug fix): with
+// max_open_conn set, the queries of a logs receiver share one pool of at most
+// that many connections. Idle connections keep the database/sql default.
 func TestLogsReceiver_MaxOpenConnBoundsTheReceiver(t *testing.T) {
-	r, c, opens := startCountedLogsReceiver(t, 1)
+	r, c, opens := startCountedLogsReceiver(t, 1, nil)
 	r.collect()
 	live, maxLive := c.state()
 	assert.Equal(t, int64(3), c.queries.Load(), "every query ran")
 	assert.Equal(t, int64(1), opens.Load(), "one pool per receiver")
 	assert.Equal(t, 1, maxLive, "at most max_open_conn connections at once")
-	assert.Equal(t, 0, live, "no idle connection kept between collections")
+	assert.Equal(t, 1, live, "the idle connection is kept (database/sql default)")
 	r.collect()
-	live, maxLive = c.state()
+	_, maxLive = c.state()
 	assert.Equal(t, int64(6), c.queries.Load())
+	assert.Equal(t, int64(1), opens.Load())
 	assert.Equal(t, 1, maxLive)
+}
+
+// TestLogsReceiver_MaxIdleConnZeroKeepsNoIdle (DBM P6, opt-in): with
+// max_idle_conn 0 the pool keeps no connection between collections.
+func TestLogsReceiver_MaxIdleConnZeroKeepsNoIdle(t *testing.T) {
+	zero := 0
+	r, c, opens := startCountedLogsReceiver(t, 1, &zero)
+	r.collect()
+	live, maxLive := c.state()
+	assert.Equal(t, int64(3), c.queries.Load())
+	assert.Equal(t, int64(1), opens.Load())
+	assert.Equal(t, 1, maxLive)
+	assert.Equal(t, 0, live, "no idle connection kept between collections")
+}
+
+// TestLogsReceiver_MaxIdleConnAloneSharesAnUnboundedPool: max_idle_conn
+// without max_open_conn shares one pool without a connection cap.
+func TestLogsReceiver_MaxIdleConnAloneSharesAnUnboundedPool(t *testing.T) {
+	zero := 0
+	r, c, opens := startCountedLogsReceiver(t, 0, &zero)
+	r.collect()
+	live, maxLive := c.state()
+	assert.Equal(t, int64(1), opens.Load(), "one pool per receiver")
+	assert.Equal(t, 3, maxLive, "no connection cap")
 	assert.Equal(t, 0, live)
 }
 
 // TestLogsReceiver_NoMaxOpenConnKeepsUpstreamBehaviour: without
-// max_open_conn every query keeps its own pool, as upstream.
+// max_open_conn and max_idle_conn every query keeps its own pool, as upstream.
 func TestLogsReceiver_NoMaxOpenConnKeepsUpstreamBehaviour(t *testing.T) {
-	r, c, opens := startCountedLogsReceiver(t, 0)
+	r, c, opens := startCountedLogsReceiver(t, 0, nil)
 	r.collect()
-	_, maxLive := c.state()
+	live, maxLive := c.state()
 	assert.Equal(t, int64(3), c.queries.Load())
 	assert.Equal(t, int64(3), opens.Load(), "one pool per query")
 	assert.Equal(t, 3, maxLive, "the queries run concurrently")
+	assert.Equal(t, 3, live, "each pool keeps its idle connection")
 }

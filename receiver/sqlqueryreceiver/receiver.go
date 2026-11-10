@@ -53,7 +53,7 @@ func createMetricsReceiverFunc(sqlOpenerFunc sqlquery.SQLOpenerFunc, clientProvi
 			}
 		}
 		var opts []scraperhelper.ControllerOption
-		pool := internal.NewPool(sqlOpenerFunc, sqlCfg.Config.Driver, dataSource, sqlCfg.MaxOpenConn)
+		pool := internal.NewPool(sqlOpenerFunc, sqlCfg.Config.Driver, dataSource, sqlCfg.MaxOpenConn, nil)
 
 		for i, query := range sqlCfg.Config.Queries {
 			if len(query.Metrics) == 0 {

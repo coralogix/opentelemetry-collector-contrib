@@ -16,6 +16,10 @@ type Config struct {
 	Config sqlquery.Config `mapstructure:",squash"`
 	// The maximumn number of open connections to the sql server. <= 0 means unlimited
 	MaxOpenConn int `mapstructure:"max_open_conn"`
+	// MaxIdleConn caps the idle connections the pool keeps between
+	// collections (database/sql SetMaxIdleConns). Unset keeps the database/sql
+	// default; 0 keeps none.
+	MaxIdleConn *int `mapstructure:"max_idle_conn"`
 
 	// prevent unkeyed literal initialization
 	_ struct{}
