@@ -3,5 +3,8 @@ properties:
   max_open_conn:
     description: The maximumn number of open connections to the sql server. <= 0 means unlimited
     type: integer
+  max_idle_conn:
+    description: The maximum number of idle connections kept between collections. Unset keeps the database/sql default; 0 keeps none.
+    type: integer
 allOf:
   - $ref: /internal/sqlquery.config

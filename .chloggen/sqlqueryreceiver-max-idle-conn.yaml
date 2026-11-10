@@ -1,0 +1,21 @@
+# Use this changelog template to create an entry for release notes.
+
+# One of 'breaking', 'deprecation', 'new_component', 'enhancement', 'bug_fix'
+change_type: enhancement
+
+# The name of the component, or a single word describing the area of concern, (e.g. receiver/filelog)
+component: receiver/sqlquery
+
+# A brief description of the change.  Surround your text with quotes ("") if it needs to start with a backtick (`).
+note: Add optional `max_idle_conn` to cap the idle connections kept between collections (`0` keeps none).
+
+# Mandatory: One or more tracking issues related to the change. You can use the PR number here if no issue exists.
+issues: []
+
+# (Optional) One or more lines of additional information to render under the main note.
+subtext:
+
+# If your change doesn't affect end users or the exported elements of any package,
+# you should instead start your pull request title with [chore] or use the "Skip Changelog" label.
+# Optional: The change logs where this change should be included. e.g. ["user"], ["api"], ["user", "api"]
+change_logs: [user]
