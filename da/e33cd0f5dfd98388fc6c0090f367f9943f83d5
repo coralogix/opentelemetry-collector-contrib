@@ -1,0 +1,21 @@
+receiver/sqlqueryreceiver/config.go
+  s_f831f252c737d7::t_006170f1dc0502 7,29-37
+receiver/sqlqueryreceiver/README.md
+  s_f831f252c737d7::t_3a712e985abc4c 69
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "dae33cd0f5dfd98388fc6c0090f367f9943f83d5",
+  "prompts": {},
+  "sessions": {
+    "s_f831f252c737d7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1d17d887-0e27-40f9-aede-50f0536246af",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "oded-dd <oded@coralogix.com>"
+    }
+  }
+}
