@@ -1,0 +1,27 @@
+receiver/sqlqueryreceiver/config.go
+  s_f831f252c737d7::t_973f3bd42cddd7 19-22
+receiver/sqlqueryreceiver/internal/database_sql.go
+  s_f831f252c737d7::t_00e5dc62d47014 24
+receiver/sqlqueryreceiver/internal/database_sql_test.go
+  s_f831f252c737d7::t_82351de588a96c 1-83
+receiver/sqlqueryreceiver/logs_receiver_max_open_conn_test.go
+  s_f831f252c737d7::t_6365e2f3fc6865 93,118,128-130,132,138,140,142-154,156-167,172,174,176,180
+receiver/sqlqueryreceiver/receiver.go
+  s_f831f252c737d7::t_6149425ef21cfa 56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8ea1a71700812fd7a12d8c4e39bf98b102e5e530",
+  "prompts": {},
+  "sessions": {
+    "s_f831f252c737d7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1d17d887-0e27-40f9-aede-50f0536246af",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "oded-dd <oded@coralogix.com>"
+    }
+  }
+}
