@@ -408,3 +408,37 @@ func TestIsValidDriver(t *testing.T) {
 		})
 	}
 }
+
+// TestConfig_Validate_MaxIdleConn (DBM P6): max_idle_conn may be unset or
+// >= 0; a negative value is rejected.
+func TestConfig_Validate_MaxIdleConn(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		idle    any
+		wantErr bool
+	}{
+		{"unset", nil, false},
+		{"zero", 0, false},
+		{"two", 2, false},
+		{"negative", -1, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := map[string]any{
+				"driver":     "postgres",
+				"datasource": "host=localhost",
+				"queries":    []any{map[string]any{"sql": "select 1", "logs": []any{map[string]any{"body_column": "a"}}}},
+			}
+			if tc.idle != nil {
+				m["max_idle_conn"] = tc.idle
+			}
+			cfg := NewFactory().CreateDefaultConfig()
+			require.NoError(t, confmap.NewFromStringMap(m).Unmarshal(cfg))
+			err := confmap.Validate(cfg)
+			if tc.wantErr {
+				assert.ErrorContains(t, err, "max_idle_conn")
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
