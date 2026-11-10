@@ -179,3 +179,35 @@ func TestLogsReceiver_NoMaxOpenConnKeepsUpstreamBehaviour(t *testing.T) {
 	assert.Equal(t, 3, maxLive, "the queries run concurrently")
 	assert.Equal(t, 3, live, "each pool keeps its idle connection")
 }
+
+// TestMetricsReceiver_MaxIdleConnZeroKeepsNoIdle (DBM P6): the metrics
+// receiver's pool applies max_idle_conn too.
+func TestMetricsReceiver_MaxIdleConnZeroKeepsNoIdle(t *testing.T) {
+	registerCounter.Do(func() { sql.Register("dbmp6counter", counterDriver{}) })
+	c := &connCounter{}
+	counters.Store(t.Name(), c)
+	zero := 0
+	r, err := createMetricsReceiverFunc(sql.Open, sqlquery.NewDbClient)(
+		t.Context(),
+		receivertest.NewNopSettings(metadata.Type),
+		&Config{
+			Config: sqlquery.Config{
+				ControllerConfig: scraperhelper.ControllerConfig{CollectionInterval: time.Hour, InitialDelay: time.Millisecond},
+				Driver:           "dbmp6counter",
+				DataSource:       t.Name(),
+				Queries: []sqlquery.Query{{
+					SQL:     "select 1",
+					Metrics: []sqlquery.MetricCfg{{MetricName: "m", ValueColumn: "col1"}},
+				}},
+			},
+			MaxOpenConn: 1,
+			MaxIdleConn: &zero,
+		},
+		consumertest.NewNop(),
+	)
+	require.NoError(t, err)
+	require.NoError(t, r.Start(t.Context(), componenttest.NewNopHost()))
+	t.Cleanup(func() { _ = r.Shutdown(context.WithoutCancel(t.Context())) })
+	require.Eventually(t, func() bool { return c.queries.Load() >= 1 }, 5*time.Second, 5*time.Millisecond)
+	require.Eventually(t, func() bool { live, _ := c.state(); return live == 0 }, 5*time.Second, 5*time.Millisecond, "no idle connection kept")
+}
