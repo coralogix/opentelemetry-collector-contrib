@@ -221,7 +221,6 @@ components:
         - redis
         - riak
         - saphana
-        - signalfx
         - skywalking
         - snmp
         - snowflake
