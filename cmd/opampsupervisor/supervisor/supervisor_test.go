@@ -1225,6 +1225,7 @@ func Test_onMessage(t *testing.T) {
 			doneChan:                       make(chan struct{}),
 		}
 
+		s.agentUpgrading.Store(true)
 		s.onMessage(t.Context(), &types.MessageData{
 			CustomCapabilities: customCapabilities,
 		})

@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
+	"sync/atomic"
+	"syscall"
 
 	"github.com/open-telemetry/opamp-go/client/types"
 	"github.com/open-telemetry/opamp-go/protobufs"
@@ -44,9 +46,10 @@ const (
 )
 
 // errAgentUnhealthy is returned by the install function when the new agent binary
-// did not become healthy and was rolled back. Packages failing this way are not
-// installed again.
+// did not become healthy and was rolled back.
 var errAgentUnhealthy = errors.New("new agent binary did not become healthy")
+
+var errPackageRejected = errors.New("package rejected")
 
 // installFunc swaps in the agent binary staged at stagedPath and restarts the agent.
 type installFunc func(ctx context.Context, stagedPath string) error
@@ -67,6 +70,10 @@ type packageManager struct {
 	bootVersion string
 	install     installFunc
 
+	// The server sends one update at a time. Its config stays separate from
+	// the active config until the package is ready to install.
+	pendingRemoteConfig atomic.Pointer[protobufs.AgentRemoteConfig]
+
 	// mu guards state and both state files. opamp-go may call SetLastReportedStatuses
 	// from its download reporter goroutine while the sync goroutine runs.
 	mu    sync.Mutex
@@ -86,9 +93,9 @@ type packageState struct {
 	// ExecutableSHA256 is the SHA-256 of the agent executable installed from the
 	// package. It detects executables replaced outside the Supervisor.
 	ExecutableSHA256 hexBytes `yaml:"executable_sha256,omitempty"`
-	// FailedContentHashes are the content hashes of packages whose agent binary did
-	// not become healthy. They are not installed again.
-	FailedContentHashes []hexBytes `yaml:"failed_content_hashes,omitempty"`
+	// RejectedContentHashes failed verification or contain invalid binaries.
+	// A remote config cannot make these packages acceptable.
+	RejectedContentHashes []hexBytes `yaml:"rejected_content_hashes,omitempty"`
 }
 
 // hexBytes marshals bytes as a hex string for human readability.
@@ -142,7 +149,7 @@ func newPackageManager(logger *zap.Logger, storageDir string, agentCfg config.Ag
 		// The recorded package is no longer the running agent. Forget it so the
 		// server's next offer is installed instead of skipped as up to date.
 		logger.Info("Agent executable was replaced outside of the Supervisor, forgetting the installed package")
-		p.state = packageState{FailedContentHashes: p.state.FailedContentHashes}
+		p.state = packageState{RejectedContentHashes: p.state.RejectedContentHashes}
 		if err := p.writeState(); err != nil {
 			return nil, err
 		}
@@ -219,8 +226,8 @@ func (p *packageManager) UpdateContent(ctx context.Context, packageName, downloa
 	if packageName != agentPackageName {
 		return fmt.Errorf("package %q is not supported, only the top-level agent package is", packageName)
 	}
-	if p.failedBefore(contentHash) {
-		return fmt.Errorf("package with content hash %x failed to install before, not retrying", contentHash)
+	if p.rejectedBefore(contentHash) {
+		return fmt.Errorf("package with content hash %x was rejected before, not retrying", contentHash)
 	}
 
 	pkg, err := io.ReadAll(io.LimitReader(data, maxPackageBytes+1))
@@ -231,7 +238,7 @@ func (p *packageManager) UpdateContent(ctx context.Context, packageName, downloa
 		return fmt.Errorf("package exceeds maximum size of %d bytes", maxPackageBytes)
 	}
 	if actual := sha256.Sum256(pkg); !bytes.Equal(actual[:], contentHash) {
-		return fmt.Errorf("package content hash %x does not match the offered content hash %x", actual, contentHash)
+		return p.recordRejection(contentHash, fmt.Errorf("package content hash %x does not match the offered content hash %x: %w", actual, contentHash, errPackageRejected))
 	}
 
 	v, err := verifier.NewVerifier(p.verifierCfg, p.cacheDir)
@@ -239,7 +246,7 @@ func (p *packageManager) UpdateContent(ctx context.Context, packageName, downloa
 		return fmt.Errorf("create package verifier: %w", err)
 	}
 	if err = v.Verify(pkg, signature); err != nil {
-		return fmt.Errorf("verify package signature: %w", err)
+		return p.recordRejection(contentHash, fmt.Errorf("verify package signature: %w: %w", errPackageRejected, err))
 	}
 
 	extractor, err := archive.NewExtractor(archive.FormatFromURL(downloadURL))
@@ -249,6 +256,9 @@ func (p *packageManager) UpdateContent(ctx context.Context, packageName, downloa
 	stagedPath := p.executable + ".new"
 	defer os.Remove(stagedPath) // no-op once the staged binary is installed
 	if err = extractor.Extract(ctx, pkg, p.agentBinary, stagedPath); err != nil {
+		if errors.Is(err, archive.ErrInvalidPackage) {
+			return p.recordRejection(contentHash, fmt.Errorf("extract agent binary: %w: %w", err, errPackageRejected))
+		}
 		return fmt.Errorf("extract agent binary: %w", err)
 	}
 	exeHash, err := fileSHA256(stagedPath)
@@ -257,15 +267,7 @@ func (p *packageManager) UpdateContent(ctx context.Context, packageName, downloa
 	}
 
 	if err = p.install(ctx, stagedPath); err != nil {
-		if errors.Is(err, errAgentUnhealthy) {
-			p.mu.Lock()
-			p.state.FailedContentHashes = append(p.state.FailedContentHashes, contentHash)
-			if writeErr := p.writeState(); writeErr != nil {
-				err = errors.Join(err, writeErr)
-			}
-			p.mu.Unlock()
-		}
-		return err
+		return p.recordRejection(contentHash, err)
 	}
 
 	p.mu.Lock()
@@ -310,12 +312,23 @@ func (p *packageManager) SetLastReportedStatuses(statuses *protobufs.PackageStat
 	return os.WriteFile(p.statusesPath, statusBytes, 0o600)
 }
 
-func (p *packageManager) failedBefore(contentHash []byte) bool {
+func (p *packageManager) rejectedBefore(contentHash []byte) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return slices.ContainsFunc(p.state.FailedContentHashes, func(h hexBytes) bool {
-		return bytes.Equal(h, contentHash)
-	})
+	return slices.ContainsFunc(p.state.RejectedContentHashes, func(h hexBytes) bool { return bytes.Equal(h, contentHash) })
+}
+
+func (p *packageManager) recordRejection(contentHash []byte, failure error) error {
+	if !errors.Is(failure, errPackageRejected) && !errors.Is(failure, syscall.ENOEXEC) {
+		return failure
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if slices.ContainsFunc(p.state.RejectedContentHashes, func(h hexBytes) bool { return bytes.Equal(h, contentHash) }) {
+		return failure
+	}
+	p.state.RejectedContentHashes = append(p.state.RejectedContentHashes, bytes.Clone(contentHash))
+	return errors.Join(failure, p.writeState())
 }
 
 // writeState persists the package state. The caller must hold p.mu.

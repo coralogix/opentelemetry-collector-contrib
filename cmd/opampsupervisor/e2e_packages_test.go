@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -91,7 +92,7 @@ exec %q "$@"
 	case hangWhenRunning:
 		return []byte(fmt.Sprintf(`#!/bin/sh
 case "$*" in
-  *bootstrap_config.yaml*) ;;
+  *bootstrap_config.yaml*|validate*) ;;
   *) exec sleep 600 ;;
 esac
 %s`, run))
@@ -108,10 +109,12 @@ type agentPackageServer struct {
 
 	mu sync.Mutex
 	// packages maps download paths to the package offered there.
-	packages      map[string][]byte
-	versions      []string
-	healthy       bool
-	packageStatus *protobufs.PackageStatus
+	packages       map[string][]byte
+	versions       []string
+	healthy        bool
+	packageStatus  *protobufs.PackageStatus
+	configStatus   *protobufs.RemoteConfigStatus
+	beforeDownload func()
 }
 
 func newAgentPackageServer(t *testing.T) *agentPackageServer {
@@ -134,16 +137,23 @@ func newAgentPackageServer(t *testing.T) *agentPackageServer {
 			if status := message.GetPackageStatuses().GetPackages()[agentPackageName]; status != nil {
 				s.packageStatus = proto.Clone(status).(*protobufs.PackageStatus)
 			}
+			if message.RemoteConfigStatus != nil {
+				s.configStatus = proto.Clone(message.RemoteConfigStatus).(*protobufs.RemoteConfigStatus)
+			}
 			return &protobufs.ServerToAgent{}
 		},
 	})
 	s.files = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		pkg, ok := s.packages[r.URL.Path]
+		beforeDownload := s.beforeDownload
 		s.mu.Unlock()
 		if !ok {
 			http.NotFound(w, r)
 			return
+		}
+		if beforeDownload != nil {
+			beforeDownload()
 		}
 		_, _ = w.Write(pkg)
 	}))
@@ -184,13 +194,13 @@ func (s *agentPackageServer) status() *protobufs.PackageStatus {
 }
 
 // offer sends pkg to the Supervisor as version of the top-level agent package.
-func (s *agentPackageServer) offer(version string, pkg []byte) {
+func (s *agentPackageServer) offer(version string, pkg []byte, remoteConfig ...*protobufs.AgentRemoteConfig) {
 	contentHash := sha256.Sum256(pkg)
 	downloadPath := "/otelcol-contrib_" + version + "_" + runtime.GOOS + "_" + runtime.GOARCH + ".tar.gz"
 	s.mu.Lock()
 	s.packages[downloadPath] = pkg
 	s.mu.Unlock()
-	s.opamp.sendToSupervisor(&protobufs.ServerToAgent{
+	message := &protobufs.ServerToAgent{
 		PackagesAvailable: &protobufs.PackagesAvailable{
 			Packages: map[string]*protobufs.PackageAvailable{
 				agentPackageName: {
@@ -205,7 +215,192 @@ func (s *agentPackageServer) offer(version string, pkg []byte) {
 			},
 			AllPackagesHash: contentHash[:],
 		},
+	}
+	if len(remoteConfig) != 0 {
+		message.RemoteConfig = remoteConfig[0]
+	}
+	s.opamp.sendToSupervisor(message)
+}
+
+func upgradeConfig(t *testing.T, port int, marker string) *protobufs.AgentRemoteConfig {
+	t.Helper()
+	cfg, _ := createHealthCheckCollectorConfWithPort(t, strconv.Itoa(port))
+	body := []byte("service:\n  telemetry:\n    resource:\n      attributes:\n        - name: upgrade_test\n          value: " + marker + "\n")
+	hash := sha256.Sum256(body)
+	return &protobufs.AgentRemoteConfig{
+		Config:     &protobufs.AgentConfigMap{ConfigMap: map[string]*protobufs.AgentConfigObject{"": {Body: cfg.Bytes()}, "marker.yaml": {Body: body}}},
+		ConfigHash: hash[:],
+	}
+}
+
+func TestSupervisorUpgradesAgentWithPairedConfig(t *testing.T) {
+	skipAgentUpgradeTestOnWindows(t)
+	starts := filepath.Join(t.TempDir(), "starts")
+	trackedWrapper := func(version string) []byte {
+		wrapper := string(agentWrapper(t, version, runCollector))
+		return []byte(strings.Replace(wrapper, "#!/bin/sh\n", fmt.Sprintf(`#!/bin/sh
+if [ "$1" = validate ] && [ %q = %q ] && grep -q upgrade_test "$3"; then
+  echo 'this config requires the new Collector' >&2
+  exit 1
+fi
+case "$*" in
+  *effective.yaml*)
+    marker=$(sed -n '/name: upgrade_test/{n;s/.*value: //p;}' "$2")
+    echo %q:"$marker" >> %q
+    ;;
+esac
+`, version, oldAgentVersion, version, starts), 1))
+	}
+	env := startSupervisorWithAgent(t, func(executable string) {
+		require.NoError(t, os.WriteFile(executable, trackedWrapper(oldAgentVersion), 0o700)) //nolint:gosec // The test wrapper must be executable.
 	})
+	defer env.supervisor.Shutdown()
+
+	downloadStarted := make(chan struct{})
+	releaseDownload := make(chan struct{})
+	defer func() {
+		select {
+		case <-releaseDownload:
+		default:
+			close(releaseDownload)
+		}
+	}()
+	env.server.mu.Lock()
+	env.server.beforeDownload = func() {
+		close(downloadStarted)
+		<-releaseDownload
+	}
+	env.server.mu.Unlock()
+	pkg := agentTarGz(t, trackedWrapper(newAgentVersion))
+	paired := upgradeConfig(t, env.healthCheckPort, "paired")
+	env.server.offer(newAgentVersion, pkg, paired)
+	select {
+	case <-downloadStarted:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the package download did not start")
+	}
+	configPath := filepath.Join(env.storageDir, "effective.yaml")
+	require.Never(t, func() bool {
+		body, err := os.ReadFile(configPath)
+		require.NoError(t, err)
+		return bytes.Contains(body, []byte("upgrade_test"))
+	}, time.Second, 50*time.Millisecond, "the paired config must not reach the old Collector")
+	assert.True(t, env.collectorServesHealthCheck())
+	close(releaseDownload)
+	env.waitForInstalled(t, newAgentVersion, pkg)
+	env.waitForConfigStatus(t, paired, protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED)
+
+	// The server waits for both results before sending another instruction.
+	env.server.opamp.sendToSupervisor(&protobufs.ServerToAgent{RemoteConfig: upgradeConfig(t, env.healthCheckPort, "later")})
+	require.Eventually(t, func() bool {
+		body, err := os.ReadFile(starts)
+		return err == nil && strings.Contains(string(body), newAgentVersion+":later") && env.collectorServesHealthCheck()
+	}, 30*time.Second, 100*time.Millisecond)
+	body, err := os.ReadFile(starts)
+	require.NoError(t, err)
+	assert.NotContains(t, string(body), oldAgentVersion+":paired")
+	assert.NotContains(t, string(body), oldAgentVersion+":later")
+	assert.Contains(t, string(body), newAgentVersion+":paired\n"+newAgentVersion+":later")
+
+	// An unchanged package must not leave its accompanying config waiting for
+	// an installation that the package syncer correctly skips.
+	alreadyInstalled := upgradeConfig(t, env.healthCheckPort, "already-installed")
+	env.server.offer(newAgentVersion, pkg, alreadyInstalled)
+	require.Eventually(t, func() bool {
+		body, err := os.ReadFile(starts)
+		return err == nil && strings.Contains(string(body), newAgentVersion+":already-installed") && env.collectorServesHealthCheck()
+	}, 30*time.Second, 100*time.Millisecond)
+	env.waitForConfigStatus(t, alreadyInstalled, protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED)
+}
+
+func TestSupervisorKeepsPreviousConfigOnFailedPairedUpgrade(t *testing.T) {
+	skipAgentUpgradeTestOnWindows(t)
+	for _, failure := range []string{"download", "binary", "config", "archive", "executable format"} {
+		t.Run(failure, func(t *testing.T) {
+			oldAgent := agentWrapper(t, oldAgentVersion, runCollector)
+			env := startSupervisorWithAgent(t, func(executable string) {
+				require.NoError(t, os.WriteFile(executable, oldAgent, 0o700)) //nolint:gosec // The test wrapper must be executable.
+			})
+			defer env.supervisor.Shutdown()
+			configPath := filepath.Join(env.storageDir, "last_recv_remote_config.dat")
+			previousConfig, err := os.ReadFile(configPath)
+			require.NoError(t, err)
+			target := upgradeConfig(t, env.healthCheckPort, "paired")
+			behavior := runCollector
+			if failure == "binary" {
+				behavior = exitImmediately
+			}
+			if failure == "config" {
+				target.Config.ConfigMap["invalid.yaml"] = &protobufs.AgentConfigObject{Body: []byte("receivers:\n  unknown_receiver:\n")}
+			}
+			newAgent := agentWrapper(t, newAgentVersion, behavior)
+			if failure == "executable format" {
+				newAgent = []byte("not an executable")
+			}
+			pkg := agentTarGz(t, newAgent)
+			if failure == "archive" {
+				pkg = []byte("not a gzip archive")
+			}
+			if failure == "download" {
+				// A closed endpoint makes the HTTP request fail before installation.
+				env.server.files.Close()
+			}
+			env.server.offer(newAgentVersion, pkg, target)
+			env.waitForPackageStatus(t, protobufs.PackageStatusEnum_PackageStatusEnum_InstallFailed, "")
+			env.waitForConfigStatus(t, target, protobufs.RemoteConfigStatuses_RemoteConfigStatuses_FAILED)
+			env.requireExecutable(t, oldAgent)
+			require.Eventually(t, func() bool {
+				return env.server.lastVersion() == oldAgentVersion && env.collectorServesHealthCheck()
+			}, 30*time.Second, 100*time.Millisecond)
+			stored, err := os.ReadFile(configPath)
+			require.NoError(t, err)
+			assert.Equal(t, previousConfig, stored)
+			effective, err := os.ReadFile(filepath.Join(env.storageDir, "effective.yaml"))
+			require.NoError(t, err)
+			assert.NotContains(t, string(effective), "upgrade_test")
+			assert.NoFileExists(t, filepath.Join(env.storageDir, "agent_upgrade.json"))
+
+			if failure == "archive" || failure == "executable format" {
+				corrected := upgradeConfig(t, env.healthCheckPort, "corrected")
+				env.server.offer(newAgentVersion, pkg, corrected)
+				env.waitForPackageStatus(t, protobufs.PackageStatusEnum_PackageStatusEnum_InstallFailed, "was rejected before, not retrying")
+				env.waitForConfigStatus(t, corrected, protobufs.RemoteConfigStatuses_RemoteConfigStatuses_FAILED)
+				env.requireExecutable(t, oldAgent)
+			}
+			if failure == "config" {
+				// The same package must recover when paired with a valid config.
+				corrected := upgradeConfig(t, env.healthCheckPort, "corrected")
+				env.server.offer(newAgentVersion, pkg, corrected)
+				env.waitForInstalled(t, newAgentVersion, pkg)
+				env.waitForConfigStatus(t, corrected, protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED)
+				env.requireExecutable(t, newAgent)
+				require.Eventually(t, env.collectorServesHealthCheck, 10*time.Second, 100*time.Millisecond)
+			}
+		})
+	}
+}
+
+func TestSupervisorRetriesPackageAfterStartupFailure(t *testing.T) {
+	skipAgentUpgradeTestOnWindows(t)
+	oldAgent := agentWrapper(t, oldAgentVersion, runCollector)
+	newAgent := agentWrapper(t, newAgentVersion, runCollector)
+	env := startSupervisorWithAgent(t, func(executable string) {
+		require.NoError(t, os.WriteFile(executable, oldAgent, 0o700)) //nolint:gosec // The test wrapper must be executable.
+	})
+	defer env.supervisor.Shutdown()
+	pkg := agentTarGz(t, newAgent)
+	invalid := upgradeConfig(t, env.healthCheckPort, "invalid")
+	invalid.Config.ConfigMap["invalid.yaml"] = &protobufs.AgentConfigObject{Body: []byte("receivers:\n  unknown_receiver:\n")}
+	env.server.offer(newAgentVersion, pkg, invalid)
+	env.waitForPackageStatus(t, protobufs.PackageStatusEnum_PackageStatusEnum_InstallFailed, "unknown_receiver")
+	env.waitForConfigStatus(t, invalid, protobufs.RemoteConfigStatuses_RemoteConfigStatuses_FAILED)
+
+	// The failed config was rolled back. A later package-only offer must retry
+	// the same binary with the current working config.
+	env.server.offer(newAgentVersion, pkg)
+	env.waitForInstalled(t, newAgentVersion, pkg)
+	env.requireExecutable(t, newAgent)
+	require.Eventually(t, env.collectorServesHealthCheck, 10*time.Second, 100*time.Millisecond)
 }
 
 func agentTarGz(t *testing.T, binary []byte) []byte {
@@ -230,6 +425,16 @@ type agentUpgradeEnv struct {
 	executable      string
 	storageDir      string
 	healthCheckPort int
+}
+
+func (e *agentUpgradeEnv) waitForConfigStatus(t *testing.T, remoteConfig *protobufs.AgentRemoteConfig, want protobufs.RemoteConfigStatuses) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		e.server.mu.Lock()
+		defer e.server.mu.Unlock()
+		status := e.server.configStatus
+		return status != nil && status.Status == want && bytes.Equal(status.LastRemoteConfigHash, remoteConfig.ConfigHash)
+	}, 30*time.Second, 100*time.Millisecond)
 }
 
 // startSupervisorWithAgent starts a Supervisor whose agent executable is written
@@ -419,11 +624,6 @@ func TestSupervisorRollsBackFailedAgentUpgrade(t *testing.T) {
 				return env.server.lastVersion() == oldAgentVersion && env.server.isHealthy() && env.collectorServesHealthCheck()
 			}, 30*time.Second, 250*time.Millisecond, "the previous agent must run again after the rollback")
 
-			// The failed package is not installed again when offered again.
-			env.server.offer(newAgentVersion, pkg)
-			env.waitForPackageStatus(t, protobufs.PackageStatusEnum_PackageStatusEnum_InstallFailed, "failed to install before, not retrying")
-			env.requireExecutable(t, oldAgent)
-			assert.True(t, env.collectorServesHealthCheck())
 		})
 	}
 }

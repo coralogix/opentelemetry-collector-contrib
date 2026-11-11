@@ -233,6 +233,7 @@ type Supervisor struct {
 
 	// packageManager handles agent packages offered by the server. nil unless accepts_packages is set.
 	packageManager *packageManager
+	packageSyncWG  sync.WaitGroup
 	// agentUpgrade carries agent binary installs from the package manager to
 	// runAgentProcess, which owns the agent process and executable.
 	agentUpgrade chan agentUpgradeRequest
@@ -2039,6 +2040,8 @@ func (s *Supervisor) runAgentProcess() {
 
 	configApplyTimeoutTimer := time.NewTimer(0)
 	configApplyTimeoutTimer.Stop()
+	defer restartTimer.Stop()
+	defer configApplyTimeoutTimer.Stop()
 
 	for {
 		select {
@@ -2178,7 +2181,9 @@ func (s *Supervisor) runAgentProcess() {
 			s.reportActiveConfigStatus(protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED, "")
 
 		case req := <-s.agentUpgrade:
-			req.result <- s.upgradeAgent(req.stagedPath)
+			restartTimer.Stop()
+			configApplyTimeoutTimer.Stop()
+			req.result <- s.upgradeAgent(req.stagedPath, req.remoteConfig)
 
 		case <-s.doneChan:
 			err := s.commander.Stop(s.runCtx)
@@ -2285,10 +2290,7 @@ func (s *Supervisor) reloadAgentConfig() error {
 
 func (s *Supervisor) writeAgentConfig() error {
 	cfgState := s.cfgState.Load().(*configState)
-	if err := os.WriteFile(s.agentConfigFilePath(), []byte(cfgState.mergedConfig), 0o600); err != nil {
-		return err
-	}
-	return nil
+	return os.WriteFile(s.agentConfigFilePath(), []byte(cfgState.mergedConfig), 0o600)
 }
 
 func (s *Supervisor) hasAgentConfigState() bool {
@@ -2406,6 +2408,8 @@ func (s *Supervisor) Shutdown() {
 		}
 	}
 
+	s.packageSyncWG.Wait()
+
 	// Stop extensions after the OpAMP client (which may use their HeaderFunc)
 	// and before self-telemetry shuts down (extensions may log on shutdown).
 	if s.extensions != nil {
@@ -2488,11 +2492,14 @@ func (s *Supervisor) saveLastReceivedOwnTelemetrySettings(set *protobufs.Connect
 
 // saveAndReportConfigStatus saves the config status to the persistent state and reports it to the server.
 func (s *Supervisor) saveAndReportConfigStatus(status protobufs.RemoteConfigStatuses, errorMessage string) {
+	s.reportRemoteConfigStatus(s.remoteConfig.Load(), status, errorMessage)
+}
+
+func (s *Supervisor) reportRemoteConfigStatus(remoteConfig *protobufs.AgentRemoteConfig, status protobufs.RemoteConfigStatuses, errorMessage string) {
 	if !s.config.Capabilities.AcceptsRemoteConfig {
 		s.telemetrySettings.Logger.Debug("supervisor is not configured to report remote config status")
 		return
 	}
-	remoteConfig := s.remoteConfig.Load()
 	rcs := &protobufs.RemoteConfigStatus{
 		LastRemoteConfigHash: remoteConfig.GetConfigHash(),
 		Status:               status,
@@ -2598,15 +2605,10 @@ func (s *Supervisor) onMessage(ctx context.Context, msg *types.MessageData) {
 		configChanged = s.processAgentIdentificationMessage(msg.AgentIdentification) || configChanged
 	}
 
-	if msg.RemoteConfig != nil {
-		configChanged = s.processRemoteConfigMessage(ctx, msg.RemoteConfig) || configChanged
-	}
-
 	if msg.PackageSyncer != nil {
-		// Sync runs in the background and outlives this callback, so it gets runCtx.
-		if err := msg.PackageSyncer.Sync(s.runCtx); err != nil {
-			s.telemetrySettings.Logger.Error("Could not sync offered packages", zap.Error(err))
-		}
+		s.syncPackages(msg)
+	} else if msg.RemoteConfig != nil {
+		configChanged = s.processRemoteConfigMessage(ctx, msg.RemoteConfig) || configChanged
 	}
 
 	if msg.OwnMetricsConnSettings != nil || msg.OwnTracesConnSettings != nil || msg.OwnLogsConnSettings != nil {

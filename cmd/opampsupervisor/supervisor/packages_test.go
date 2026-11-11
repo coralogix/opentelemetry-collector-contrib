@@ -9,9 +9,12 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/iotest"
 
 	"github.com/open-telemetry/opamp-go/client/types"
 	"github.com/open-telemetry/opamp-go/protobufs"
@@ -171,21 +174,79 @@ func TestPackageManagerUpdateContentInstallsRawAndTarGz(t *testing.T) {
 	}
 }
 
-func TestPackageManagerUpdateContentDoesNotRetryUnhealthyPackage(t *testing.T) {
+func TestPackageManagerRetriesStartupFailure(t *testing.T) {
 	env := newTestPackageEnv(t)
 	env.installErr = errAgentUnhealthy
 	p := env.newManager(t)
-	pkg := tarGz(t, testAgentBinary, []byte("bad agent"))
+	pkg := tarGz(t, testAgentBinary, []byte("new agent"))
+	require.ErrorIs(t, p.UpdateContent(t.Context(), agentPackageName, "https://example.com/a.tar.gz", bytes.NewReader(pkg), sha(pkg), nil), errAgentUnhealthy)
+	assert.NoFileExists(t, env.executable+".new")
 
-	err := p.UpdateContent(t.Context(), agentPackageName, "https://example.com/a.tar.gz", bytes.NewReader(pkg), sha(pkg), nil)
-	require.ErrorIs(t, err, errAgentUnhealthy)
-	assert.NoFileExists(t, env.executable+".new", "the staged binary must be cleaned up")
-
-	// The failure is remembered across restarts.
+	// The same package is tried again after restart, with no config change.
 	p = env.newManager(t)
-	err = p.UpdateContent(t.Context(), agentPackageName, "https://example.com/a.tar.gz", bytes.NewReader(pkg), sha(pkg), nil)
-	require.ErrorContains(t, err, "failed to install before, not retrying")
-	assert.Len(t, env.installs, 1, "a package that failed must not be installed again")
+	require.ErrorIs(t, p.UpdateContent(t.Context(), agentPackageName, "https://example.com/a.tar.gz", bytes.NewReader(pkg), sha(pkg), nil), errAgentUnhealthy)
+	env.installErr = nil
+	require.NoError(t, p.UpdateContent(t.Context(), agentPackageName, "https://example.com/a.tar.gz", bytes.NewReader(pkg), sha(pkg), nil))
+	assert.Len(t, env.installs, 3)
+	content, err := os.ReadFile(env.executable)
+	require.NoError(t, err)
+	assert.Equal(t, "new agent", string(content))
+}
+
+func TestPackageManagerIgnoresLegacyStartupRejections(t *testing.T) {
+	env := newTestPackageEnv(t)
+	pkg := tarGz(t, testAgentBinary, []byte("new agent"))
+	statePath := filepath.Join(env.storageDir, packageStateFileName)
+	legacyState := fmt.Sprintf("failed_content_hashes:\n  - %x\neffective_config_hash: deadbeef\n", sha(pkg))
+	require.NoError(t, os.WriteFile(statePath, []byte(legacyState), 0o600))
+	p := env.newManager(t)
+	require.NoError(t, p.UpdateContent(t.Context(), agentPackageName, "https://example.com/a.tar.gz", bytes.NewReader(pkg), sha(pkg), nil))
+	stored, err := os.ReadFile(statePath)
+	require.NoError(t, err)
+	assert.NotContains(t, string(stored), "failed_content_hashes")
+	assert.NotContains(t, string(stored), "effective_config_hash")
+}
+
+func TestPackageManagerRetriesAfterExtractionHostRepair(t *testing.T) {
+	env := newTestPackageEnv(t)
+	p := env.newManager(t)
+	pkg := tarGz(t, testAgentBinary, []byte("new agent"))
+	// A directory at the staging path prevents writing the binary. It does not
+	// establish a fault in the downloaded archive.
+	require.NoError(t, os.Mkdir(env.executable+".new", 0o700))
+	require.ErrorContains(t, p.UpdateContent(t.Context(), agentPackageName, "https://example.com/a.tar.gz", bytes.NewReader(pkg), sha(pkg), nil), "open destination file")
+	// UpdateContent removes the empty staging directory when the attempt ends.
+	assert.NoFileExists(t, env.executable+".new")
+	p = env.newManager(t)
+	require.NoError(t, p.UpdateContent(t.Context(), agentPackageName, "https://example.com/a.tar.gz", bytes.NewReader(pkg), sha(pkg), nil))
+	assert.Len(t, env.installs, 1)
+}
+
+func TestPackageManagerDoesNotRetryRejectedContentWithConfig(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		pkg           []byte
+		hash          []byte
+		errorContains string
+	}{
+		{name: "hash verification", pkg: []byte("corrupted download"), hash: sha([]byte("expected content")), errorContains: "does not match the offered content hash"},
+		{name: "invalid archive", pkg: []byte("not a gzip archive"), hash: sha([]byte("not a gzip archive")), errorContains: "create gzip reader"},
+		{name: "missing binary", pkg: tarGz(t, "README.md", []byte("readme")), errorContains: "read tarball looking for"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := newTestPackageEnv(t)
+			p := env.newManager(t)
+			hash := tc.hash
+			if hash == nil {
+				hash = sha(tc.pkg)
+			}
+			require.ErrorContains(t, p.UpdateContent(t.Context(), agentPackageName, "https://example.com/a.tar.gz", bytes.NewReader(tc.pkg), hash, nil), tc.errorContains)
+			p = env.newManager(t)
+			p.pendingRemoteConfig.Store(&protobufs.AgentRemoteConfig{ConfigHash: []byte("new config")})
+			require.ErrorContains(t, p.UpdateContent(t.Context(), agentPackageName, "https://example.com/a.tar.gz", iotest.ErrReader(errors.New("must reject before reading")), hash, nil), "was rejected before, not retrying")
+			assert.Empty(t, env.installs)
+		})
+	}
 }
 
 func TestPackageManagerUpdateContentRetriesAfterOtherErrors(t *testing.T) {
