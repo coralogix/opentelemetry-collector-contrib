@@ -14,6 +14,7 @@ agent:
   executable: '{{.executable}}'
   bootstrap_timeout: 10s
   config_apply_timeout: 10s
+  validate_config: true
   package:
     # The package is a test-built wrapper script, so it is not signed.
     verifier:

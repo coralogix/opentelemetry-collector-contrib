@@ -22,6 +22,10 @@ import (
 // to disk during an install. It guards against unbounded writes.
 const maxAgentBytes = 1 << 30 // 1 GiB
 
+// ErrInvalidPackage identifies malformed content, rather than a failure to
+// write the binary to the host filesystem.
+var ErrInvalidPackage = errors.New("invalid agent package")
+
 // Format is the format of the package downloaded by the supervisor.
 type Format string
 
@@ -83,7 +87,7 @@ type rawExtractor struct {
 // If an error occurs during write, the file at destination will be removed.
 func (r rawExtractor) Extract(_ context.Context, pkg []byte, _, destination string) error {
 	if int64(len(pkg)) > r.maxBytes {
-		return fmt.Errorf("binary exceeds maximum size of %d bytes", r.maxBytes)
+		return fmt.Errorf("binary exceeds maximum size of %d bytes: %w", r.maxBytes, ErrInvalidPackage)
 	}
 
 	// Create or truncate the destination with executable permissions.
@@ -114,7 +118,7 @@ func (e tarGzipExtractor) Extract(_ context.Context, pkg []byte, binaryName, des
 
 	gzipReader, err := gzip.NewReader(bytes.NewReader(pkg))
 	if err != nil {
-		return fmt.Errorf("create gzip reader: %w", err)
+		return fmt.Errorf("create gzip reader: %w: %w", ErrInvalidPackage, err)
 	}
 	defer gzipReader.Close()
 
@@ -122,13 +126,13 @@ func (e tarGzipExtractor) Extract(_ context.Context, pkg []byte, binaryName, des
 	for {
 		header, err := tarReader.Next()
 		if err != nil {
-			return fmt.Errorf("read tarball looking for %q: %w", binaryName, err)
+			return fmt.Errorf("read tarball looking for %q: %w: %w", binaryName, ErrInvalidPackage, err)
 		}
 		if header.Name != binaryName {
 			continue
 		}
 		if header.Size > e.maxBytes {
-			return fmt.Errorf("binary exceeds maximum size of %d bytes", e.maxBytes)
+			return fmt.Errorf("binary exceeds maximum size of %d bytes: %w", e.maxBytes, ErrInvalidPackage)
 		}
 		break
 	}
@@ -152,6 +156,9 @@ func writeBinaryToDestination(binary io.Reader, destination string) error {
 
 	if _, err := io.Copy(f, binary); err != nil {
 		_ = os.Remove(destination)
+		if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, gzip.ErrChecksum) {
+			return fmt.Errorf("write binary to destination: %w: %w", ErrInvalidPackage, err)
+		}
 		return fmt.Errorf("write binary to destination: %w", err)
 	}
 

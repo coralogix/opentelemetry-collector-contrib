@@ -658,9 +658,11 @@ will save it in case it is necessary for reverting.
 If after the restart the Collector does not become healthy the
 Supervisor will revert the update, by stopping the Collector, reverting
 the Collector executable file and starting the Collector again. The
-failed update attempt will be reported to the Backend and the failed
-Collector package version will be marked as "bad" to avoid trying it
-again even if offered by the Backend.
+failed update attempt will be reported to the Backend. Startup failures do not
+reject the package. Any later server offer can retry the same package, with or
+without a remote config.
+Packages rejected by hash or signature verification, or identified as invalid
+archives or executables, remain rejected regardless of the offered config.
 
 Note: cached local config must be invalidated after executable updates
 to make sure a fresh AgentDescription is obtained by the Supervisor on
@@ -1007,9 +1009,18 @@ After the package is verified, the Supervisor installs it:
 If the new binary cannot be bootstrapped, exits, or does not report being healthy in time,
 the Supervisor stops it, renames `<executable>.old` back to the executable path, and
 bootstraps and starts the previous binary again. The package is reported as
-`INSTALL_FAILED`. The content hash of a package that failed this way is saved, and the
-package is not installed again if the server offers it again. To allow a retry, remove
-the hash from `failed_content_hashes` in `package_state.yaml` in `storage.directory`.
+`INSTALL_FAILED`. For a combined package/config offer, the previous config is restored
+with the previous binary.
+
+Startup failures do not create a package rejection. The server can retry the
+same package with or without a remote config in a later offer. The server controls
+retry timing. Legacy `failed_content_hashes` and `effective_config_hash` entries
+in `package_state.yaml` are ignored.
+
+Hash or signature verification failures, invalid archives, and executable format errors
+identified by the host are saved in `rejected_content_hashes`. These packages are not
+retried, even with a config. Failures to fetch verification material or write staged
+files do not establish that the package is invalid and do not create such a rejection.
 
 If the Supervisor stops during an upgrade, `<executable>.old` still exists when it starts
 again. The Supervisor then restores it before it runs the Collector.

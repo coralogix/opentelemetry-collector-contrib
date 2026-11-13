@@ -131,6 +131,30 @@ while `telemetry.resource.detection/development` is configured.
 
 Visit [localhost:4321](http://localhost:4321) again to verify that your Collector appears in the Agents list.
 
+## Package and config updates
+
+When one OpAMP message offers both an agent package and a remote config, the
+Supervisor applies them together. The current Collector keeps its config during
+the download. The new Collector starts with the config from that message.
+If config validation is enabled, the new binary validates that config.
+
+The Supervisor waits for the new Collector to become healthy before completing
+the update. If the update fails, it restores the previous binary and config.
+It also recovers the pair if the Supervisor stops during the update. This
+recovery does not require `agent::automatic_config_rollback` to be enabled.
+
+The server must wait for the package and config results before sending another
+update. The Supervisor continues processing messages during the upgrade and does
+not queue instructions. If the offered package is already installed, the
+Supervisor applies the accompanying config normally.
+
+If a package fails to start with its config, the Supervisor reports the update
+as failed and restores the previous working binary/config pair. A startup
+failure does not reject the package. The server can retry the same package in
+a later offer, with or without a remote config. The server controls retry timing.
+Packages rejected by hash or signature verification, or identified as invalid
+archives or executables, remain rejected even when a config accompanies them.
+
 ## Collector crash log snippets
 
 The Supervisor can include the tail of the Collector's logs in health and remote config failure messages when the Collector process exits unexpectedly. This is disabled by default because Collector logs may contain sensitive data. To enable it, set `agent::collector_crash_log_snippet_kib` to the maximum number of log KiB to include. A value of `0` disables the feature. `4` is a reasonable starting point. The maximum value is `1024` (1 MiB).

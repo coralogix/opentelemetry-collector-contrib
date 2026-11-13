@@ -115,6 +115,7 @@ func TestRawExtractor_Extract_Size(t *testing.T) {
 			err := extractor.Extract(t.Context(), contents, "otelcol-contrib", destination)
 			if tc.expectErr != "" {
 				require.ErrorContains(t, err, tc.expectErr)
+				require.ErrorIs(t, err, ErrInvalidPackage)
 				return
 			}
 			require.NoError(t, err)
@@ -159,6 +160,7 @@ func TestTarGzipExtractor_Extract(t *testing.T) {
 
 		err := tarGzipExtractor{maxBytes: maxAgentBytes}.Extract(t.Context(), archive, "otelcol-contrib", destination)
 		require.ErrorContains(t, err, `read tarball looking for "otelcol-contrib"`)
+		require.ErrorIs(t, err, ErrInvalidPackage)
 	})
 
 	t.Run("not a gzip archive", func(t *testing.T) {
@@ -166,6 +168,22 @@ func TestTarGzipExtractor_Extract(t *testing.T) {
 
 		err := tarGzipExtractor{maxBytes: maxAgentBytes}.Extract(t.Context(), []byte("not gzip data"), "otelcol-contrib", destination)
 		require.ErrorContains(t, err, "create gzip reader")
+		require.ErrorIs(t, err, ErrInvalidPackage)
+	})
+
+	t.Run("truncated binary", func(t *testing.T) {
+		var pkg bytes.Buffer
+		gz := gzip.NewWriter(&pkg)
+		tw := tar.NewWriter(gz)
+		require.NoError(t, tw.WriteHeader(&tar.Header{Name: "otelcol-contrib", Size: 8, Mode: 0o700}))
+		_, err := tw.Write([]byte("short"))
+		require.NoError(t, err)
+		// End the gzip stream before all declared binary bytes are present.
+		require.NoError(t, gz.Close())
+		destination := filepath.Join(t.TempDir(), "otelcol-contrib")
+		err = tarGzipExtractor{maxBytes: maxAgentBytes}.Extract(t.Context(), pkg.Bytes(), "otelcol-contrib", destination)
+		require.ErrorIs(t, err, ErrInvalidPackage)
+		assert.NoFileExists(t, destination)
 	})
 
 	t.Run("binary exceeds max size", func(t *testing.T) {
@@ -176,6 +194,7 @@ func TestTarGzipExtractor_Extract(t *testing.T) {
 
 		err := tarGzipExtractor{maxBytes: 8}.Extract(t.Context(), archive, "otelcol-contrib", destination)
 		require.ErrorContains(t, err, "binary exceeds maximum size of 8 bytes")
+		require.ErrorIs(t, err, ErrInvalidPackage)
 
 		// The size check happens before the destination is opened.
 		_, statErr := os.Stat(destination)
