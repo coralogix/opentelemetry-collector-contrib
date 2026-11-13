@@ -1413,6 +1413,7 @@ func (s *Supervisor) composeOpAMPExtensionConfigForPort(port int) []byte {
 		"PID":                        s.pidProvider.PID(),
 		"PPIDPollInterval":           orphanPollInterval,
 		"ReportsAvailableComponents": s.config.Capabilities.ReportsAvailableComponents,
+		"ReportsRawConfig":           s.config.Agent.ReportsRawConfig,
 		"IncludeResourceAttributes":  s.config.Agent.Description.IncludeResourceAttributes,
 	}
 	err := s.opampextensionTemplate.Execute(
