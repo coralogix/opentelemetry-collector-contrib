@@ -142,3 +142,9 @@ func (p *postgreSQLScraper) recordObfuscationFailures(ctx context.Context, rows 
 		p.telemetry.PostgresqlQueryObfuscationFailed.Add(ctx, n, metric.WithAttributes(attribute.String("event", event.String())))
 	}
 }
+
+// sqlErrorFields returns the log fields for a database error: the SQLSTATE
+// and a fixed category, never the message. [DBM P7b] Stub.
+func sqlErrorFields(_ error) []zap.Field {
+	return nil
+}
