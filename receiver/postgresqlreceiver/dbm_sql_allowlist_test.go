@@ -14,11 +14,15 @@ package postgresqlreceiver
 // tests, so every fork rebase re-checks upstream's SQL (EC-08 drift guard).
 
 import (
-	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -77,6 +81,16 @@ var brStatementExceptions = map[string][]string{
 	"deallocate prepare otel_%s":               {"deallocate", "prepare"},
 }
 
+// brNonSQLLiterals are Go literals that start like a statement but are not
+// SQL the receiver sends, matched on their whole normalised text: the keys of
+// explainableStatements (client.go, the first words of statements that EXPLAIN
+// accepts), the "Merge Cond" plan key (obfuscate.go) and the "reset" outcome
+// (scraper.go). Any longer text is checked.
+var brNonSQLLiterals = map[string]bool{
+	"select": true, "table": true, "delete": true, "insert": true, "update": true,
+	"with": true, "merge": true, "values": true, "merge cond": true, "reset": true,
+}
+
 // brStatementStarters are the first words that make a string literal a SQL
 // statement for this test. A literal that starts with any other word (a log
 // message, a fragment) is checked for forbidden names only.
@@ -107,15 +121,221 @@ func (v brViolation) String() string {
 
 // collectReceiverSQL returns the templates and the folded string literals of
 // the package's non-test Go files under dir.
-func collectReceiverSQL(_ string) ([]brSQLText, []brSQLText, error) {
-	return nil, nil, errors.New("not implemented")
+func collectReceiverSQL(dir string) ([]brSQLText, []brSQLText, error) {
+	var templates, literals []brSQLText
+	tmpls, err := filepath.Glob(filepath.Join(dir, "templates", "*.tmpl"))
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, path := range tmpls {
+		b, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil, nil, readErr
+		}
+		templates = append(templates, brSQLText{origin: filepath.ToSlash(path) + ":1", text: string(b)})
+	}
+	goFiles, err := filepath.Glob(filepath.Join(dir, "*.go"))
+	if err != nil {
+		return nil, nil, err
+	}
+	fset := token.NewFileSet()
+	for _, path := range goFiles {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+		if err != nil {
+			return nil, nil, err
+		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			switch e := n.(type) {
+			case *ast.BinaryExpr:
+				if s, ok := brFold(e); ok {
+					literals = append(literals, brSQLText{origin: fset.Position(e.Pos()).String(), text: s})
+					return false
+				}
+			case *ast.BasicLit:
+				if s, ok := brFold(e); ok {
+					literals = append(literals, brSQLText{origin: fset.Position(e.Pos()).String(), text: s})
+				}
+			}
+			return true
+		})
+	}
+	return templates, literals, nil
+}
+
+// brFold returns the value of a string literal or of a + concatenation of
+// string literals.
+func brFold(e ast.Expr) (string, bool) {
+	switch v := e.(type) {
+	case *ast.BasicLit:
+		if v.Kind != token.STRING {
+			return "", false
+		}
+		s, err := strconv.Unquote(v.Value)
+		return s, err == nil
+	case *ast.ParenExpr:
+		return brFold(v.X)
+	case *ast.BinaryExpr:
+		if v.Op != token.ADD {
+			return "", false
+		}
+		l, ok := brFold(v.X)
+		if !ok {
+			return "", false
+		}
+		r, ok := brFold(v.Y)
+		if !ok {
+			return "", false
+		}
+		return l + r, true
+	}
+	return "", false
+}
+
+var (
+	brTemplateAction = regexp.MustCompile(`(?s)\{\{.*?\}\}`)
+	brBlockComment   = regexp.MustCompile(`(?s)/\*.*?\*/`)
+	brLineComment    = regexp.MustCompile(`--[^\n]*`)
+	brSpaces         = regexp.MustCompile(`\s+`)
+)
+
+// brNormalize removes comments, collapses whitespace and lower-cases.
+func brNormalize(s string) string {
+	s = brBlockComment.ReplaceAllString(s, " ")
+	s = brLineComment.ReplaceAllString(s, " ")
+	s = brSpaces.ReplaceAllString(s, " ")
+	return strings.TrimSpace(strings.ToLower(s))
+}
+
+type brTok struct {
+	kind byte // 'w' word, 'q' quoted identifier, 's' string, 'p' punctuation or number
+	text string
+}
+
+// brTokenize splits normalised SQL into tokens. Unlike the sweep tokenizer it
+// accepts semicolons, dollar signs and backslashes, which the receiver's SQL
+// and Go format strings use; an unterminated string runs to the end.
+func brTokenize(s string) []brTok {
+	var out []brTok
+	for i := 0; i < len(s); {
+		c := s[i]
+		switch {
+		case c == ' ':
+			i++
+		case c == '\'' || c == '"':
+			j := i + 1
+			for j < len(s) {
+				if s[j] == c {
+					if j+1 < len(s) && s[j+1] == c {
+						j += 2
+						continue
+					}
+					break
+				}
+				j++
+			}
+			kind := byte('s')
+			if c == '"' {
+				kind = 'q'
+			}
+			out = append(out, brTok{kind, s[i+1 : min(j, len(s))]})
+			i = j + 1
+		case c == '_' || c >= 'a' && c <= 'z':
+			j := i
+			for j < len(s) && (s[j] == '_' || s[j] >= 'a' && s[j] <= 'z' || s[j] >= '0' && s[j] <= '9') {
+				j++
+			}
+			out = append(out, brTok{'w', s[i:j]})
+			i = j
+		default:
+			out = append(out, brTok{'p', string(c)})
+			i++
+		}
+	}
+	return out
+}
+
+// brIsStatement reports whether a Go literal starts like a SQL statement.
+func brIsStatement(s string) bool {
+	toks := brTokenize(brNormalize(s))
+	for _, t := range toks {
+		if t.kind == 'p' && t.text == "(" {
+			continue
+		}
+		return t.kind == 'w' && brStatementStarters[t.text]
+	}
+	return false
+}
+
+func isNotIdent(r rune) bool {
+	return r != '_' && (r < 'a' || r > 'z') && (r < '0' || r > '9')
 }
 
 // checkSQL returns the violations of one SQL text. isTemplate marks a text
 // that is SQL as a whole (a template); a Go literal is checked for keywords
 // only when it starts like a statement.
-func checkSQL(_ brSQLText, _ bool) []brViolation {
-	return nil
+func checkSQL(t brSQLText, isTemplate bool) []brViolation {
+	text := t.text
+	if isTemplate {
+		text = brTemplateAction.ReplaceAllString(text, " ")
+	}
+	norm := brNormalize(text)
+	var out []brViolation
+	for _, tok := range brTokenize(norm) {
+		switch tok.kind {
+		case 'w', 'q':
+			if brForbiddenNames[tok.text] {
+				out = append(out, brViolation{t.origin, norm, "forbidden name " + tok.text})
+			}
+		case 's':
+			for _, w := range strings.FieldsFunc(tok.text, isNotIdent) {
+				if brForbiddenNames[w] {
+					out = append(out, brViolation{t.origin, norm, "forbidden name " + w + " (in a string)"})
+				}
+			}
+		}
+	}
+	if !isTemplate && (!brIsStatement(text) || brNonSQLLiterals[norm]) {
+		return out
+	}
+	for stmt := range strings.SplitSeq(norm, ";") {
+		stmt = strings.TrimSpace(stmt)
+		if stmt == "" {
+			continue
+		}
+		exempt := map[string]bool{}
+		allowed, isException := brStatementExceptions[stmt]
+		for _, k := range allowed {
+			exempt[k] = true
+		}
+		toks := brTokenize(stmt)
+		first := ""
+		for _, tok := range toks {
+			if tok.kind == 'p' && tok.text == "(" {
+				continue
+			}
+			if tok.kind == 'w' {
+				first = tok.text
+			}
+			break
+		}
+		if !isException && first != "select" && first != "with" && first != "show" && first != "explain" && first != "values" {
+			out = append(out, brViolation{t.origin, stmt, fmt.Sprintf("statement starts with %q, not SELECT, WITH, SHOW, EXPLAIN or VALUES", first)})
+		}
+		for i, tok := range toks {
+			if tok.kind != 'w' || !brForbiddenKeywords[tok.text] || exempt[tok.text] {
+				continue
+			}
+			// "relname AS table" is a column alias, not the TABLE command.
+			if tok.text == "table" && i > 0 && toks[i-1].kind == 'w' && toks[i-1].text == "as" {
+				continue
+			}
+			out = append(out, brViolation{t.origin, stmt, "forbidden keyword " + strings.ToUpper(tok.text)})
+		}
+	}
+	return out
 }
 
 func TestReceiverSQLAllowList(t *testing.T) {
@@ -139,6 +359,7 @@ func TestReceiverSQLAllowList(t *testing.T) {
 			joined.WriteString("\n")
 		}
 	}
+	t.Logf("BR-3 scan: %d templates, %d Go literals, %d of them SQL statements", len(templates), len(literals), statements)
 	assert.GreaterOrEqual(t, statements, 15, "the scan found too few SQL statements in the Go files")
 	for _, want := range []string{
 		"select dealloc, stats_reset from pg_stat_statements_info",
@@ -187,6 +408,8 @@ func TestReceiverSQLAllowListRejects(t *testing.T) {
 		{name: "DML in a template", text: "SELECT 1;\n{{ if .x }}INSERT INTO t VALUES (1){{ end }}", isTemplate: true},
 		{name: "template fragment", text: "{{ .a }} UPDATE t SET a = 1", isTemplate: true},
 		{name: "oracle histogram", text: "SELECT low_value, high_value FROM dba_tab_col_statistics"},
+		{name: "a one-word statement that is not exempt", text: "VACUUM"},
+		{name: "an exempt word with more text", text: "DELETE FROM t"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			assert.NotEmpty(t, checkSQL(brSQLText{origin: "probe", text: tc.text}, tc.isTemplate), "must be rejected: %q", tc.text)
@@ -202,11 +425,3 @@ func TestReceiverSQLAllowListRejects(t *testing.T) {
 		assert.Empty(t, checkSQL(brSQLText{origin: "probe", text: ok}, false), "must be allowed: %q", ok)
 	}
 }
-
-// brIsStatement reports whether a Go literal starts like a SQL statement.
-func brIsStatement(string) bool { return false }
-
-// brNormalize removes comments, collapses whitespace and lower-cases.
-func brNormalize(s string) string { return s }
-
-var _ = os.ReadFile
