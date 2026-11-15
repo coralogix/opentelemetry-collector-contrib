@@ -676,7 +676,9 @@ func TestReceiverSQLCallSites(t *testing.T) {
 
 // TestCallSiteCheckRejects proves the call-site pass on synthetic code.
 func TestCallSiteCheckRejects(t *testing.T) {
-	const header = "package p\n\nimport (\n\t\"context\"\n\t\"fmt\"\n\t\"os\"\n\t\"strings\"\n)\n\n"
+	const header = "package p\n\nimport (\n\t\"context\"\n\t\"fmt\"\n\t\"os\"\n\t\"strings\"\n)\n\n" +
+		"//go:embed templates/q.tmpl\nvar qs string\n\nvar qt = template.Must(template.New(\"q\").Parse(qs))\n\n" +
+		"type O string\n\nfunc (o O) column() string {\n\tswitch o {\n\tcase \"a\":\n\t\treturn \"calls\"\n\t}\n\treturn \"\"\n}\n\n"
 	for _, tc := range []struct {
 		name, src string
 		bad       bool
@@ -691,10 +693,68 @@ func TestCallSiteCheckRejects(t *testing.T) {
 		{name: "helper param fed by input", src: "func h(c C, ctx context.Context, q string) { c.db.QueryContext(ctx, q) }\nfunc f(c C, ctx context.Context, s string) { h(c, ctx, s) }", bad: true},
 		{name: "computed text", src: `func f(c C, ctx context.Context) { c.db.QueryContext(ctx, strings.ToUpper("select 1")) }`, bad: true},
 		{name: "non-template Execute", src: `func f(t T) { t.Execute(nil, nil) }`, bad: true},
+		// review round 2: I1 template data
+		{name: "template data: literal, numeric and bool params, quoted list, listed method", src: `func f(c C, ctx context.Context, limit int64, ts float64, top, since bool, dbs []string, o O) {
+	order := o.column()
+	buf := bytes.Buffer{}
+	_ = qt.Execute(&buf, map[string]any{"a": "x", "limit": limit, "ts": ts, "top": top && since, "dbs": quoteDatabaseList(dbs), "orderBy": order, "n": 3})
+	c.db.QueryContext(ctx, buf.String())
+}`},
+		{name: "template data from the environment", src: `func f(c C, ctx context.Context) {
+	buf := bytes.Buffer{}
+	_ = qt.Execute(&buf, map[string]any{"orderBy": os.Getenv("Q")})
+	c.db.QueryContext(ctx, buf.String())
+}`, bad: true},
+		{name: "template data from a string parameter", src: `func f(c C, ctx context.Context, s string) {
+	buf := bytes.Buffer{}
+	_ = qt.Execute(&buf, map[string]any{"orderBy": s})
+	c.db.QueryContext(ctx, buf.String())
+}`, bad: true},
+		{name: "template data map in a variable", src: `func f(c C, ctx context.Context, m map[string]any) {
+	buf := bytes.Buffer{}
+	_ = qt.Execute(&buf, m)
+	c.db.QueryContext(ctx, buf.String())
+}`, bad: true},
+		{name: "ExecuteTemplate data from the environment", src: `func f(c C, ctx context.Context) {
+	buf := bytes.Buffer{}
+	_ = qt.ExecuteTemplate(&buf, "q", map[string]any{"orderBy": os.Getenv("Q")})
+	c.db.QueryContext(ctx, buf.String())
+}`, bad: true},
+		{name: "template data from an unlisted method", src: `func f(c C, ctx context.Context, o O) {
+	buf := bytes.Buffer{}
+	_ = qt.Execute(&buf, map[string]any{"orderBy": o.String()})
+	c.db.QueryContext(ctx, buf.String())
+}`, bad: true},
+		// review round 2: minors
+		{name: "M2 write through a pointer to the local", src: `func f(c C, ctx context.Context) {
+	q := "SELECT 1"
+	p := &q
+	*p = os.Getenv("Q")
+	c.db.QueryContext(ctx, q)
+}`, bad: true},
+		{name: "M3 method value", src: `func f(c C, ctx context.Context) {
+	run := c.db.QueryContext
+	run(ctx, os.Getenv("Q"))
+}`, bad: true},
+		{name: "M4 package-level function literal", src: "var run = func(c C, ctx context.Context) { c.db.QueryContext(ctx, os.Getenv(\"Q\")) }", bad: true},
+		{name: "M5 aliased NewDbClient", src: `func f(c C) { _ = sq.NewDbClient(nil, os.Getenv("Q"), nil, nil) }`, bad: true},
+		{name: "M5 DbSQLClient literal", src: `func f() { _ = sqlquery.DbSQLClient{SQL: "SELECT 1"} }`, bad: true},
+		{name: "M6 template buffer written elsewhere", src: `func f(c C, ctx context.Context) {
+	buf := bytes.Buffer{}
+	_ = qt.Execute(&buf, map[string]any{})
+	buf.WriteString(os.Getenv("Q"))
+	c.db.QueryContext(ctx, buf.String())
+}`, bad: true},
+		{name: "closure parameter shadows a literal local", src: `func f(c C, ctx context.Context) {
+	query := "SELECT 1"
+	run := func(query string) { c.db.QueryContext(ctx, query) }
+	run(os.Getenv("Q"))
+	_ = query
+}`, bad: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fset := token.NewFileSet()
-			f, err := parser.ParseFile(fset, "probe.go", header+tc.src, parser.SkipObjectResolution)
+			f, err := parser.ParseFile(fset, "probe.go", header+tc.src, parser.ParseComments|parser.SkipObjectResolution)
 			require.NoError(t, err)
 			_, violations := checkCallSitesFiles(fset, []*ast.File{f})
 			if tc.bad {
