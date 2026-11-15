@@ -14,6 +14,7 @@ package postgresqlreceiver
 // tests, so every fork rebase re-checks upstream's SQL (EC-08 drift guard).
 
 import (
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -410,6 +411,42 @@ func TestReceiverSQLAllowListRejects(t *testing.T) {
 		{name: "oracle histogram", text: "SELECT low_value, high_value FROM dba_tab_col_statistics"},
 		{name: "a one-word statement that is not exempt", text: "VACUUM"},
 		{name: "an exempt word with more text", text: "DELETE FROM t"},
+		// review I1: every PostgreSQL command word starts a statement
+		{name: "start transaction read write", text: "START TRANSACTION READ WRITE"},
+		{name: "end", text: "END"},
+		{name: "abort", text: "ABORT"},
+		{name: "declare cursor", text: "DECLARE c CURSOR WITH HOLD FOR SELECT 1"},
+		{name: "fetch", text: "FETCH 10 FROM c"},
+		{name: "move", text: "MOVE NEXT IN c"},
+		{name: "close", text: "CLOSE c"},
+		{name: "release", text: "RELEASE SAVEPOINT s"},
+		{name: "reassign owned", text: "REASSIGN OWNED BY a TO b"},
+		// review I2: writing and admin functions, and any function outside the allow-list
+		{name: "stats reset", text: "SELECT pg_stat_statements_reset()"},
+		{name: "qualified stats reset", text: "SELECT pg_catalog.pg_stat_reset()"},
+		{name: "set_config", text: "SELECT set_config('log_statement', 'none', false)"},
+		{name: "setval", text: "SELECT setval('s', 1)"},
+		{name: "nextval", text: "SELECT nextval('s')"},
+		{name: "advisory lock", text: "SELECT pg_advisory_lock(1)"},
+		{name: "terminate backend", text: "SELECT pg_terminate_backend(pid) FROM pg_stat_activity"},
+		{name: "cancel backend", text: "SELECT pg_cancel_backend(1)"},
+		{name: "reload conf", text: "SELECT pg_reload_conf()"},
+		{name: "large object", text: "SELECT lo_import('/etc/passwd')"},
+		{name: "read file", text: "SELECT pg_read_file('postgresql.conf')"},
+		{name: "read binary file", text: "SELECT pg_read_binary_file('x')"},
+		{name: "dblink", text: "SELECT * FROM dblink('host=x', 'DELETE FROM t') AS t(a int)"},
+		{name: "replication slot", text: "SELECT pg_create_logical_replication_slot('s', 'pgoutput')"},
+		{name: "denied function in a fragment", text: " AND pg_terminate_backend(pid)"},
+		{name: "function outside the allow-list", text: "SELECT pg_sleep(10)"},
+		// review I3: the British spelling
+		{name: "analyse", text: "ANALYSE t"},
+		{name: "explain analyse", text: "EXPLAIN ANALYSE SELECT 1"},
+		// review M5: comment markers inside a string never hide what follows
+		{name: "dash-dash in a string", text: "SELECT '--', histogram_bounds FROM x"},
+		{name: "comment opener in a string", text: "SELECT '/*' AS a; DELETE FROM t; SELECT '*/'"},
+		// review M6: E'' strings take backslash escapes
+		// E'\'' is one quote; a tokenizer without escapes would read the rest as one string.
+		{name: "escaped quote in an E string", text: `SELECT E'\'' ; DELETE FROM t; --'`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			assert.NotEmpty(t, checkSQL(brSQLText{origin: "probe", text: tc.text}, tc.isTemplate), "must be rejected: %q", tc.text)
@@ -420,8 +457,66 @@ func TestReceiverSQLAllowListRejects(t *testing.T) {
 		"/* otel-collector-ignore */ SET plan_cache_mode = force_generic_plan;",
 		"PREPARE otel_%s AS %s;",
 		"/* otel-collector-ignore */ DEALLOCATE PREPARE otel_%s",
-		"failed to update the cache", // a log message, not a statement
+		"failed to update the cache",                                              // a log message, not a statement
+		"SELECT E'it\\'s' AS a",                                                   // an escaped quote stays inside the string
+		"SELECT pg_catalog.pg_database_size(datname) FROM pg_catalog.pg_database", // an allow-listed function
 	} {
 		assert.Empty(t, checkSQL(brSQLText{origin: "probe", text: ok}, false), "must be allowed: %q", ok)
 	}
+}
+
+// TestReceiverSQLCallSites (review I4): every SQL argument of a database call
+// in the package resolves to a literal, a constant, an embedded template or a
+// listed exception, so no SQL text can bypass TestReceiverSQLAllowList.
+func TestReceiverSQLCallSites(t *testing.T) {
+	sites, violations, err := checkCallSites(".")
+	require.NoError(t, err)
+	t.Logf("BR-3 call sites: %d database calls checked", len(sites))
+	assert.GreaterOrEqual(t, len(sites), 30, "the call-site pass found too few database calls")
+	assert.Empty(t, violations, "BR-3: a database call takes SQL that the allow-list scan cannot see")
+}
+
+// TestCallSiteCheckRejects proves the call-site pass on synthetic code.
+func TestCallSiteCheckRejects(t *testing.T) {
+	const header = "package p\n\nimport (\n\t\"context\"\n\t\"fmt\"\n\t\"os\"\n\t\"strings\"\n)\n\n"
+	for _, tc := range []struct {
+		name, src string
+		bad       bool
+	}{
+		{name: "literal", src: `func f(c C, ctx context.Context) { c.db.QueryContext(ctx, "SELECT 1") }`},
+		{name: "const", src: "const q = `SELECT 1`\nfunc f(c C, ctx context.Context) { c.db.QueryRowContext(ctx, q) }"},
+		{name: "local literal", src: `func f(c C, ctx context.Context) { q := "SELECT 1"; c.db.QueryContext(ctx, q) }`},
+		{name: "helper param fed by literals", src: "func h(c C, ctx context.Context, q string) { c.db.QueryContext(ctx, q) }\nfunc f(c C, ctx context.Context) { h(c, ctx, `SELECT 1`) }"},
+		{name: "environment", src: `func f(c C, ctx context.Context) { c.db.QueryContext(ctx, os.Getenv("Q")) }`, bad: true},
+		{name: "appended input", src: `func f(c C, ctx context.Context, s string) { q := "SELECT "; q += s; c.db.ExecContext(ctx, q) }`, bad: true},
+		{name: "sprintf with an unlisted argument", src: `func f(c C, ctx context.Context, s string) { c.db.ExecContext(ctx, fmt.Sprintf("SELECT %s", s)) }`, bad: true},
+		{name: "helper param fed by input", src: "func h(c C, ctx context.Context, q string) { c.db.QueryContext(ctx, q) }\nfunc f(c C, ctx context.Context, s string) { h(c, ctx, s) }", bad: true},
+		{name: "computed text", src: `func f(c C, ctx context.Context) { c.db.QueryContext(ctx, strings.ToUpper("select 1")) }`, bad: true},
+		{name: "non-template Execute", src: `func f(t T) { t.Execute(nil, nil) }`, bad: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fset := token.NewFileSet()
+			f, err := parser.ParseFile(fset, "probe.go", header+tc.src, parser.SkipObjectResolution)
+			require.NoError(t, err)
+			_, violations := checkCallSitesFiles(fset, []*ast.File{f})
+			if tc.bad {
+				assert.NotEmpty(t, violations, "must be rejected")
+			} else {
+				assert.Empty(t, violations, "must be accepted")
+			}
+		})
+	}
+}
+
+// brCallSite is one database call found by the call-site pass.
+type brCallSite struct{ origin, call string }
+
+// checkCallSites runs the call-site pass over the package's non-test files.
+func checkCallSites(_ string) ([]brCallSite, []brViolation, error) {
+	return nil, nil, errors.New("not implemented")
+}
+
+// checkCallSitesFiles runs the call-site pass over parsed files.
+func checkCallSitesFiles(_ *token.FileSet, _ []*ast.File) ([]brCallSite, []brViolation) {
+	return nil, nil
 }
