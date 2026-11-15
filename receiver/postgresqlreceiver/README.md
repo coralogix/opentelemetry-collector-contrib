@@ -163,6 +163,19 @@ The following options are available:
 - `max_rows_per_query`: (optional, default=1000) The max number of rows would return from the query 
 against `pg_stat_activity`.
 
+#### Truncated text and obfuscation failures
+
+`pg_stat_activity` keeps at most `track_activity_query_size - 1` bytes of a statement. When a
+sample's text fills that buffer (for non-ASCII text: within 3 bytes of it, since the server clips a
+partial character), the record carries `db.query.text.truncated: true`, so consumers never treat the
+text as complete. The query reads `octet_length(query)` and the setting from `pg_settings` for this.
+
+When the obfuscator cannot parse a statement (for example a statement cut in the middle of a string
+literal), `db.query.text` is empty and the receiver logs the event, a fixed reason, the query id and the
+text length. It never logs the statement text. The internal counter
+`otelcol_postgresql.query.obfuscation.failed` (attribute `event`: `query_sample` or `top_query`)
+counts these failures.
+
 #### Raw query text (`dbm.allow_literal_capture`)
 
 - `dbm.allow_literal_capture`: (optional, default=`false`) When `true`, each `db.server.query_sample`
