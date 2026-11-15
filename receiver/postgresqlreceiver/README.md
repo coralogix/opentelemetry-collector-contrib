@@ -174,7 +174,10 @@ When the obfuscator cannot parse a statement (for example a statement cut in the
 literal), `db.query.text` is empty and the receiver logs the event, a fixed reason, the query id and the
 text length. It never logs the statement text. The internal counter
 `otelcol_postgresql.query.obfuscation.failed` (attribute `event`: `query_sample` or `top_query`)
-counts these failures.
+counts these failures. It counts every row read whose text failed obfuscation, including rows the
+scrape later drops (for example a top query that is only seeded into the delta cache, or a sample batch
+discarded because of a conversion error). On the EXPLAIN path, database errors are logged by SQLSTATE
+(`sqlState`, `errorCategory`) only, never by their message, which can quote a value of the statement.
 
 #### Raw query text (`dbm.allow_literal_capture`)
 

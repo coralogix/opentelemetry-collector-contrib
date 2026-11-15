@@ -735,8 +735,9 @@ func (p *postgreSQLScraper) collectTopQuery(ctx context.Context, clientFactory p
 			if err == nil {
 				plan, err = dbClient.explainQuery(ctx, rawQuery, queryID, logger)
 				if err != nil {
-					// [DBM P7] the length only, never the statement text.
-					logger.Error("failed to explain query", zap.String("queryID", queryID), zap.Int("query_length", len(rawQuery)), zap.Error(err))
+					// [DBM P7] the length only, never the statement text; [DBM P7b]
+					// the SQLSTATE only, never the server message.
+					logger.Error("failed to explain query", append([]zap.Field{zap.String("queryID", queryID), zap.Int("queryLength", len(rawQuery))}, sqlErrorFields(err)...)...)
 				}
 				// to avoid flood the error message. there are some internal queries meant to not be
 				// explained. we wait for the cache to expire and report the error again.

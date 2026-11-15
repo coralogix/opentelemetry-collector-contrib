@@ -5,8 +5,10 @@ package postgresqlreceiver // import "github.com/open-telemetry/opentelemetry-co
 
 import (
 	"context"
+	"errors"
 	"strings"
 
+	"github.com/lib/pq"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -67,8 +69,8 @@ func logObfuscationFailure(logger *zap.Logger, event metadata.AttributeEvent, qu
 	fields := []zap.Field{
 		zap.String("event", event.String()),
 		zap.String("reason", obfuscationFailureReason(err)),
-		zap.String("query_id", queryID),
-		zap.Int("query_length", textLength),
+		zap.String("queryID", queryID),
+		zap.Int("queryLength", textLength),
 	}
 	if event == metadata.AttributeEventTopQuery {
 		logger.Error("failed to obfuscate query", fields...)
@@ -130,6 +132,8 @@ func applyQuerySampleTruncated(logs plog.Logs, truncated []bool, logger *zap.Log
 }
 
 // recordObfuscationFailures counts and strips the obfuscation marker of rows.
+// It runs on the rows as read, so the count includes rows the scrape later
+// drops (seeded top queries, a discarded sample batch).
 func (p *postgreSQLScraper) recordObfuscationFailures(ctx context.Context, rows []map[string]any, event metadata.AttributeEvent) {
 	var n int64
 	for _, row := range rows {
@@ -144,7 +148,23 @@ func (p *postgreSQLScraper) recordObfuscationFailures(ctx context.Context, rows 
 }
 
 // sqlErrorFields returns the log fields for a database error: the SQLSTATE
-// and a fixed category, never the message. [DBM P7b] Stub.
-func sqlErrorFields(_ error) []zap.Field {
-	return nil
+// and its fixed condition name, never the message. [DBM P7b] A PostgreSQL
+// message, detail or context can quote a value of the statement (for
+// example 22P02 "invalid input syntax for type integer: ..."), so the error
+// text is never logged on the EXPLAIN path.
+func sqlErrorFields(err error) []zap.Field {
+	if pqErr, ok := errors.AsType[*pq.Error](err); ok {
+		return []zap.Field{
+			zap.String("sqlState", string(pqErr.Code)),
+			zap.String("errorCategory", pqErr.Code.Name()),
+		}
+	}
+	category := "other"
+	switch {
+	case errors.Is(err, context.Canceled):
+		category = "canceled"
+	case errors.Is(err, context.DeadlineExceeded):
+		category = "deadline_exceeded"
+	}
+	return []zap.Field{zap.String("errorCategory", category)}
 }
