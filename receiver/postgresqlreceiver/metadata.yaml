@@ -133,6 +133,12 @@ attributes:
     description: The database management system (DBMS) product as identified by the client instrumentation.
     type: string
     enum: [postgresql]
+  event:
+    description: The log event whose statement text failed obfuscation.
+    type: string
+    enum:
+      - query_sample
+      - top_query
   function:
     description: The name of the function.
     type: string
@@ -816,6 +822,15 @@ metrics:
 
 telemetry:
   metrics:
+    postgresql.query.obfuscation.failed:
+      enabled: true
+      description: Number of statements whose text failed obfuscation, by event. The record then carries an empty db.query.text, and the statement text is never logged.
+      stability: development
+      unit: "{statement}"
+      attributes: [event]
+      sum:
+        value_type: int
+        monotonic: true
     postgresql.top_query.cache.events:
       enabled: true
       description: Number of statements handled by the top_query delta cache without reporting a true interval delta, by outcome. Seeded and duplicated statements report a zero delta for the interval; an evicted statement is seeded again on its next scrape.

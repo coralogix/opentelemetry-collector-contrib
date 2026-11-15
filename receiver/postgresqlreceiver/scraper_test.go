@@ -721,6 +721,9 @@ var querySampleColumns = []string{
 	querySampleColumnBlockingLockType,
 	querySampleColumnBlockingLockRelation,
 	querySampleColumnBlockingTxnStartTime,
+	// [DBM P7] truncation inputs
+	querySampleColumnQueryOctetLength,
+	querySampleColumnTrackActivityQuerySize,
 }
 
 // newSQLMockRows builds a one-row sqlmock result in the given column order,
@@ -2220,10 +2223,11 @@ func TestExplainQueryLogsRepair(t *testing.T) {
 			}
 			require.Len(t, entries, 1)
 			assert.Equal(t, zapcore.DebugLevel, entries[0].Level)
+			// [DBM P7] lengths only: statement text never goes to the log.
 			assert.Equal(t, map[string]any{
-				"queryID":         "40001",
-				"normalizedQuery": tc.query,
-				"preparedQuery":   tc.preparedQuery,
+				"queryID":                 "40001",
+				"normalized_query_length": int64(len(tc.query)),
+				"prepared_query_length":   int64(len(tc.preparedQuery)),
 			}, entries[0].ContextMap())
 		})
 	}

@@ -138,6 +138,32 @@ var MapAttributeDbSystemName = map[string]AttributeDbSystemName{
 	"postgresql": AttributeDbSystemNamePostgresql,
 }
 
+// AttributeEvent specifies the value event attribute.
+type AttributeEvent int
+
+const (
+	_ AttributeEvent = iota
+	AttributeEventQuerySample
+	AttributeEventTopQuery
+)
+
+// String returns the string representation of the AttributeEvent.
+func (av AttributeEvent) String() string {
+	switch av {
+	case AttributeEventQuerySample:
+		return "query_sample"
+	case AttributeEventTopQuery:
+		return "top_query"
+	}
+	return ""
+}
+
+// MapAttributeEvent is a helper map of string to AttributeEvent attribute value.
+var MapAttributeEvent = map[string]AttributeEvent{
+	"query_sample": AttributeEventQuerySample,
+	"top_query":    AttributeEventTopQuery,
+}
+
 // AttributeOperation specifies the value operation attribute.
 type AttributeOperation int
 
