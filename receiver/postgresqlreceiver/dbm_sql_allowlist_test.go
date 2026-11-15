@@ -10,7 +10,8 @@ package postgresqlreceiver
 // of histograms, most-common values or column statistics (pg_stats and its
 // relatives). The deny lists are copied verbatim from the DBM sweep allow-list
 // (coralogix-otel-collector pkg/dbmsweep/allowlist.go, forbiddenKeywords and
-// forbiddenNames, at ecd3201); keep them in sync. It runs in the package's unit
+// forbiddenNames, at 9918271, coralogix/coralogix-otel-collector#236); keep
+// them in sync. It runs in the package's unit
 // tests, so every fork rebase re-checks upstream's SQL (EC-08 drift guard).
 
 import (
@@ -30,7 +31,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// forbiddenKeywords: copied from pkg/dbmsweep (BR-3). Statement words that
+// forbiddenKeywords: copied from pkg/dbmsweep (BR-3, cdot 9918271). Statement words that
 // write, change the schema, take locks, change settings or control
 // transactions. SELECT ... INTO creates a table and FOR UPDATE/SHARE takes
 // row locks, so INTO and FOR are forbidden.
@@ -782,11 +783,40 @@ var brSQLHelpers = map[string]string{
 	"filterQueryByDatabases": "appends WHERE/AND datname IN (...) with database names quoted as literals by quoteDatabaseList, and GROUP BY datname",
 }
 
+// brTemplateDataFuncs may produce template data (review round 2, I1).
+var brTemplateDataFuncs = map[string]string{
+	"quoteDatabaseList": "quotes every database name as a SQL literal (pq.QuoteLiteral)",
+}
+
+// brLiteralMethods may produce template data when every return of the
+// method is a string literal; the pass checks that.
+var brLiteralMethods = map[string]string{
+	"column": "TopQueryCandidateOrder.column: a fixed column name per enum value, \"\" otherwise",
+}
+
+// brNumericTypes are parameter or variable types whose values cannot carry
+// SQL text into a template.
+var brNumericTypes = map[string]bool{
+	"bool": true, "int": true, "int8": true, "int16": true, "int32": true, "int64": true,
+	"uint": true, "uint8": true, "uint16": true, "uint32": true, "uint64": true,
+	"float32": true, "float64": true,
+}
+
 // brDBMethods maps a database call to the index of its SQL argument.
 var brDBMethods = map[string]int{
 	"QueryContext": 1, "QueryRowContext": 1, "ExecContext": 1, "PrepareContext": 1,
-	"Query": 0, "QueryRow": 0, "Exec": 0, "Prepare": 0,
+	"Query": 0, "QueryRow": 0, "Exec": 0, "Prepare": 0, "NewDbClient": 1,
 }
+
+// brSelectorValueExceptions are selectors named like a database method that
+// are not method values, keyed "<function>:<selector>" (the pass has no type
+// information, so a field cannot be told from a method otherwise).
+var brSelectorValueExceptions = map[string]string{
+	"obfuscateSQL:obfuscatedQuery.Query": "the Query string field of the obfuscator's ObfuscatedQuery result",
+}
+
+// brTemplateMethods maps a template call to the index of its data argument.
+var brTemplateMethods = map[string]int{"Execute": 1, "ExecuteTemplate": 2}
 
 type brCall struct {
 	call *ast.CallExpr
@@ -794,11 +824,13 @@ type brCall struct {
 }
 
 type brPkg struct {
-	fset      *token.FileSet
-	consts    map[string]ast.Expr
-	embeds    map[string]bool // vars filled by //go:embed templates/...
-	templates map[string]bool // vars that parse an embedded template
-	calls     []brCall
+	fset       *token.FileSet
+	consts     map[string]ast.Expr
+	embeds     map[string]bool // vars filled by //go:embed templates/...
+	templates  map[string]bool // vars that parse an embedded template
+	funcs      map[string][]*ast.FuncDecl
+	calls      []brCall
+	violations []brViolation
 }
 
 // checkCallSites runs the call-site pass over the package's non-test files.
@@ -823,13 +855,36 @@ func checkCallSites(dir string) ([]brCallSite, []brViolation, error) {
 	return sites, violations, nil
 }
 
+// brWalk visits every node under root with its parent and grandparent.
+func brWalk(root ast.Node, visit func(n, parent, grand ast.Node)) {
+	var stack []ast.Node
+	ast.Inspect(root, func(n ast.Node) bool {
+		if n == nil {
+			stack = stack[:len(stack)-1]
+			return false
+		}
+		var parent, grand ast.Node
+		if len(stack) > 0 {
+			parent = stack[len(stack)-1]
+		}
+		if len(stack) > 1 {
+			grand = stack[len(stack)-2]
+		}
+		visit(n, parent, grand)
+		stack = append(stack, n)
+		return true
+	})
+}
+
 // checkCallSitesFiles runs the call-site pass over parsed files: every SQL
-// argument of a database call, sqlquery.NewDbClient and template Execute
-// must resolve to a literal, a constant, an embedded template or a listed
-// exception.
+// argument of a database call or NewDbClient, and every template Execute
+// (its receiver and its data), must resolve to text the allow-list scan
+// sees; method values and DbSQLClient literals are rejected outright.
 func checkCallSitesFiles(fset *token.FileSet, files []*ast.File) ([]brCallSite, []brViolation) {
-	p := &brPkg{fset: fset, consts: map[string]ast.Expr{}, embeds: map[string]bool{}, templates: map[string]bool{}}
+	p := &brPkg{fset: fset, consts: map[string]ast.Expr{}, embeds: map[string]bool{}, templates: map[string]bool{}, funcs: map[string][]*ast.FuncDecl{}}
 	vars := map[string]ast.Expr{}
+	var bodies []*ast.FuncDecl
+	var others []ast.Node // package-level initializers that are not function literals
 	for _, f := range files {
 		for _, decl := range f.Decls {
 			switch d := decl.(type) {
@@ -839,9 +894,12 @@ func checkCallSitesFiles(fset *token.FileSet, files []*ast.File) ([]brCallSite, 
 					if !ok {
 						continue
 					}
-					embedded := strings.Contains(d.Doc.Text(), "go:embed templates/") || strings.Contains(vs.Doc.Text(), "go:embed templates/")
-					if !embedded && d.Doc != nil {
-						for _, c := range d.Doc.List {
+					embedded := false
+					for _, cg := range []*ast.CommentGroup{d.Doc, vs.Doc} {
+						if cg == nil {
+							continue
+						}
+						for _, c := range cg.List {
 							embedded = embedded || strings.HasPrefix(c.Text, "//go:embed templates/")
 						}
 					}
@@ -853,20 +911,21 @@ func checkCallSitesFiles(fset *token.FileSet, files []*ast.File) ([]brCallSite, 
 							p.embeds[name.Name] = true
 						case d.Tok == token.VAR && i < len(vs.Values):
 							vars[name.Name] = vs.Values[i]
+							// review round 2, M4: a package-level function literal is
+							// checked like a function named after its variable.
+							if lit, ok := vs.Values[i].(*ast.FuncLit); ok {
+								bodies = append(bodies, &ast.FuncDecl{Name: ast.NewIdent(name.Name), Type: lit.Type, Body: lit.Body})
+							} else {
+								others = append(others, vs.Values[i])
+							}
 						}
 					}
 				}
 			case *ast.FuncDecl:
-				if d.Body == nil {
-					continue
+				if d.Body != nil {
+					bodies = append(bodies, d)
+					p.funcs[d.Name.Name] = append(p.funcs[d.Name.Name], d)
 				}
-				fn := d
-				ast.Inspect(d.Body, func(n ast.Node) bool {
-					if c, ok := n.(*ast.CallExpr); ok {
-						p.calls = append(p.calls, brCall{c, fn})
-					}
-					return true
-				})
 			}
 		}
 	}
@@ -882,39 +941,74 @@ func checkCallSitesFiles(fset *token.FileSet, files []*ast.File) ([]brCallSite, 
 			return true
 		})
 	}
+	scan := func(root ast.Node, fn *ast.FuncDecl) {
+		brWalk(root, func(n, parent, _ ast.Node) {
+			switch v := n.(type) {
+			case *ast.CallExpr:
+				p.calls = append(p.calls, brCall{v, fn})
+			case *ast.SelectorExpr:
+				_, db := brDBMethods[v.Sel.Name]
+				_, tm := brTemplateMethods[v.Sel.Name]
+				fnName := ""
+				if fn != nil {
+					fnName = fn.Name.Name
+				}
+				if _, listed := brSelectorValueExceptions[fnName+":"+brExprString(v)]; listed {
+					return
+				}
+				if c, ok := parent.(*ast.CallExpr); (db || tm) && (!ok || c.Fun != v) {
+					// review round 2, M3: a method value hides the call site.
+					p.violations = append(p.violations, brViolation{fset.Position(v.Pos()).String(), v.Sel.Name, "method value of " + v.Sel.Name + " (not in call position)"})
+				}
+			case *ast.CompositeLit:
+				if name := brExprString(v.Type); name == "DbSQLClient" || strings.HasSuffix(name, ".DbSQLClient") {
+					// review round 2, M5: build it with NewDbClient, which is checked.
+					p.violations = append(p.violations, brViolation{fset.Position(v.Pos()).String(), name, "DbSQLClient literal (use NewDbClient)"})
+				}
+			}
+		})
+	}
+	for _, fn := range bodies {
+		scan(fn.Body, fn)
+	}
+	for _, init := range others {
+		scan(init, nil)
+	}
 
 	var sites []brCallSite
-	var violations []brViolation
 	for _, c := range p.calls {
 		sel, ok := c.call.Fun.(*ast.SelectorExpr)
 		if !ok {
 			continue
 		}
 		origin := fset.Position(c.call.Pos()).String()
-		idx, isDB := brDBMethods[sel.Sel.Name]
-		if x, ok := sel.X.(*ast.Ident); ok && x.Name == "sqlquery" && sel.Sel.Name == "NewDbClient" {
-			idx, isDB = 1, true
-		}
-		if sel.Sel.Name == "Execute" {
-			sites = append(sites, brCallSite{origin, "Execute"})
+		if dataIdx, isTmpl := brTemplateMethods[sel.Sel.Name]; isTmpl {
+			sites = append(sites, brCallSite{origin, sel.Sel.Name})
 			if x, ok := sel.X.(*ast.Ident); !ok || !p.templates[x.Name] {
-				violations = append(violations, brViolation{origin, "Execute", "Execute on a value that is not an embedded SQL template"})
+				p.violations = append(p.violations, brViolation{origin, sel.Sel.Name, sel.Sel.Name + " on a value that is not an embedded SQL template"})
+				continue
+			}
+			if why := p.resolveTemplateData(c.call, dataIdx, c.fn); why != "" {
+				p.violations = append(p.violations, brViolation{origin, sel.Sel.Name, "template data: " + why})
 			}
 			continue
 		}
+		// review round 2, M5: NewDbClient is matched by name, whatever the
+		// package is imported as.
+		idx, isDB := brDBMethods[sel.Sel.Name]
 		if !isDB {
 			continue
 		}
 		sites = append(sites, brCallSite{origin, sel.Sel.Name})
 		if idx >= len(c.call.Args) {
-			violations = append(violations, brViolation{origin, sel.Sel.Name, "no SQL argument"})
+			p.violations = append(p.violations, brViolation{origin, sel.Sel.Name, "no SQL argument"})
 			continue
 		}
 		if why := p.resolve(c.call.Args[idx], c.fn, 0); why != "" {
-			violations = append(violations, brViolation{origin, sel.Sel.Name, why})
+			p.violations = append(p.violations, brViolation{origin, sel.Sel.Name, why})
 		}
 	}
-	return sites, violations
+	return sites, p.violations
 }
 
 func brExprString(e ast.Expr) string {
@@ -925,6 +1019,10 @@ func brExprString(e ast.Expr) string {
 		return brExprString(v.X) + "." + v.Sel.Name
 	case *ast.CallExpr:
 		return brExprString(v.Fun) + "(...)"
+	case *ast.BasicLit:
+		return v.Value
+	case nil:
+		return ""
 	}
 	return fmt.Sprintf("%T", e)
 }
@@ -958,7 +1056,45 @@ func (p *brPkg) resolve(e ast.Expr, fn *ast.FuncDecl, depth int) string {
 	return fmt.Sprintf("SQL argument %s is not a literal, constant, template or listed exception", brExprString(e))
 }
 
+// brScopeProblem fails closed on what brLocals cannot follow (review round
+// 2, M2 and closure scoping): the address of name is taken (a write through
+// the pointer is invisible), or a function literal or range clause inside
+// fn declares its own name.
+func brScopeProblem(fn *ast.FuncDecl, name string) string {
+	if fn == nil {
+		return ""
+	}
+	why := ""
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		switch v := n.(type) {
+		case *ast.UnaryExpr:
+			if id, ok := v.X.(*ast.Ident); ok && v.Op == token.AND && id.Name == name {
+				why = "the address of " + name + " is taken (writes through the pointer cannot be followed)"
+			}
+		case *ast.FuncLit:
+			for _, field := range v.Type.Params.List {
+				for _, id := range field.Names {
+					if id.Name == name {
+						why = "a function literal parameter shadows " + name
+					}
+				}
+			}
+		case *ast.RangeStmt:
+			for _, e := range []ast.Expr{v.Key, v.Value} {
+				if id, ok := e.(*ast.Ident); ok && id.Name == name {
+					why = "a range variable shadows " + name
+				}
+			}
+		}
+		return why == ""
+	})
+	return why
+}
+
 func (p *brPkg) resolveIdent(name string, fn *ast.FuncDecl, depth int) string {
+	if why := brScopeProblem(fn, name); why != "" {
+		return why
+	}
 	locals, isParam, paramIdx := brLocals(fn, name)
 	for _, rhs := range locals {
 		if why := p.resolve(rhs, fn, depth+1); why != "" {
@@ -991,11 +1127,17 @@ func (p *brPkg) resolveIdent(name string, fn *ast.FuncDecl, depth int) string {
 	return fmt.Sprintf("identifier %s is not a literal, constant, template or listed exception", name)
 }
 
-// locals returns every value assigned to name inside fn, and whether name is
-// a parameter of fn (and its index among the call arguments).
+// brLocals returns every value assigned to name inside fn, whether name is a
+// parameter of fn (and its index among the call arguments), and its
+// declared parameter type.
 func brLocals(fn *ast.FuncDecl, name string) ([]ast.Expr, bool, int) {
+	locals, isParam, idx, _ := brLocalsTyped(fn, name)
+	return locals, isParam, idx
+}
+
+func brLocalsTyped(fn *ast.FuncDecl, name string) ([]ast.Expr, bool, int, ast.Expr) {
 	if fn == nil {
-		return nil, false, 0
+		return nil, false, 0, nil
 	}
 	var out []ast.Expr
 	ast.Inspect(fn.Body, func(n ast.Node) bool {
@@ -1014,8 +1156,15 @@ func brLocals(fn *ast.FuncDecl, name string) ([]ast.Expr, bool, int) {
 			}
 		case *ast.ValueSpec:
 			for i, id := range s.Names {
-				if id.Name == name && i < len(s.Values) {
+				if id.Name != name {
+					continue
+				}
+				if i < len(s.Values) {
 					out = append(out, s.Values[i])
+				} else if t, ok := s.Type.(*ast.Ident); ok && brNumericTypes[t.Name] {
+					out = append(out, &ast.BasicLit{Kind: token.INT, Value: "0"})
+				} else {
+					out = append(out, s.Type)
 				}
 			}
 		}
@@ -1029,12 +1178,12 @@ func brLocals(fn *ast.FuncDecl, name string) ([]ast.Expr, bool, int) {
 		}
 		for _, id := range field.Names {
 			if id.Name == name {
-				return out, true, idx
+				return out, true, idx, field.Type
 			}
 			idx++
 		}
 	}
-	return out, false, 0
+	return out, false, 0, nil
 }
 
 func (p *brPkg) callersOf(fn *ast.FuncDecl) []brCall {
@@ -1075,37 +1224,169 @@ func (p *brPkg) resolveCall(c *ast.CallExpr, fn *ast.FuncDecl, depth int) string
 	case brSQLHelpers[name] != "" && len(c.Args) > 0:
 		return p.resolve(c.Args[0], fn, depth+1)
 	}
-	// buf.String() of a buffer that an embedded template wrote into.
+	// buf.String() of a buffer that only an embedded template wrote into.
 	if sel, ok := c.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "String" && fn != nil {
-		if buf, ok := sel.X.(*ast.Ident); ok && p.templateWrites(fn, buf.Name) {
+		if buf, ok := sel.X.(*ast.Ident); ok {
+			if why := p.templateBuffer(fn, buf.Name); why != "" {
+				return why
+			}
 			return ""
 		}
 	}
 	return fmt.Sprintf("SQL argument %s is not a literal, constant, template or listed exception", name)
 }
 
-// templateWrites reports whether fn runs <template>.Execute(&buf, ...).
-func (p *brPkg) templateWrites(fn *ast.FuncDecl, buf string) bool {
-	found := false
-	ast.Inspect(fn.Body, func(n ast.Node) bool {
-		c, ok := n.(*ast.CallExpr)
-		if !ok || len(c.Args) == 0 {
-			return true
+// templateBuffer returns "" when buf is written only by an embedded
+// template's Execute (review round 2, M6): every use of buf in fn is its
+// declaration, &buf as the first Execute/ExecuteTemplate argument of an
+// embedded template, or buf.String().
+func (p *brPkg) templateBuffer(fn *ast.FuncDecl, buf string) string {
+	execs, why := 0, ""
+	brWalk(fn.Body, func(n, parent, grand ast.Node) {
+		id, ok := n.(*ast.Ident)
+		if !ok || id.Name != buf || why != "" {
+			return
 		}
-		sel, ok := c.Fun.(*ast.SelectorExpr)
-		if !ok || sel.Sel.Name != "Execute" {
-			return true
-		}
-		x, ok := sel.X.(*ast.Ident)
-		if !ok || !p.templates[x.Name] {
-			return true
-		}
-		if u, ok := c.Args[0].(*ast.UnaryExpr); ok && u.Op == token.AND {
-			if id, ok := u.X.(*ast.Ident); ok && id.Name == buf {
-				found = true
+		switch par := parent.(type) {
+		case *ast.SelectorExpr:
+			if par.Sel == id {
+				return // a field or method named like the buffer
+			}
+			if c, ok := grand.(*ast.CallExpr); ok && c.Fun == par && par.Sel.Name == "String" && len(c.Args) == 0 {
+				return
+			}
+		case *ast.AssignStmt:
+			if par.Tok == token.DEFINE && len(par.Lhs) == 1 && par.Lhs[0] == id {
+				return
+			}
+		case *ast.ValueSpec:
+			return
+		case *ast.UnaryExpr:
+			if c, ok := grand.(*ast.CallExpr); ok && par.Op == token.AND && len(c.Args) > 0 && c.Args[0] == par {
+				if sel, ok := c.Fun.(*ast.SelectorExpr); ok {
+					if _, tm := brTemplateMethods[sel.Sel.Name]; tm {
+						if x, ok := sel.X.(*ast.Ident); ok && p.templates[x.Name] {
+							execs++
+							return
+						}
+					}
+				}
 			}
 		}
-		return true
+		why = fmt.Sprintf("buffer %s is used other than by an embedded template's Execute and String", buf)
 	})
-	return found
+	if why != "" {
+		return why
+	}
+	if execs == 0 {
+		return fmt.Sprintf("buffer %s is not written by an embedded template", buf)
+	}
+	return ""
+}
+
+// resolveTemplateData returns "" when the data argument of a template call
+// is a map literal whose every value is a literal or constant, a numeric or
+// boolean value, quoteDatabaseList(...) or a listed literal-returning method
+// (review round 2, I1).
+func (p *brPkg) resolveTemplateData(c *ast.CallExpr, idx int, fn *ast.FuncDecl) string {
+	if idx >= len(c.Args) {
+		return "no data argument"
+	}
+	lit, ok := c.Args[idx].(*ast.CompositeLit)
+	if !ok {
+		return "data is not a map literal: " + brExprString(c.Args[idx])
+	}
+	for _, elt := range lit.Elts {
+		kv, ok := elt.(*ast.KeyValueExpr)
+		if !ok {
+			return "data entry is not key: value"
+		}
+		if why := p.resolveData(kv.Value, fn, 0); why != "" {
+			return fmt.Sprintf("value of %s: %s", brExprString(kv.Key), why)
+		}
+	}
+	return ""
+}
+
+func (p *brPkg) resolveData(e ast.Expr, fn *ast.FuncDecl, depth int) string {
+	if depth > 8 {
+		return "data resolves too deep"
+	}
+	switch v := e.(type) {
+	case *ast.BasicLit:
+		return ""
+	case *ast.ParenExpr:
+		return p.resolveData(v.X, fn, depth+1)
+	case *ast.UnaryExpr:
+		if v.Op == token.NOT || v.Op == token.SUB {
+			return p.resolveData(v.X, fn, depth+1)
+		}
+	case *ast.BinaryExpr:
+		if why := p.resolveData(v.X, fn, depth+1); why != "" {
+			return why
+		}
+		return p.resolveData(v.Y, fn, depth+1)
+	case *ast.Ident:
+		if v.Name == "true" || v.Name == "false" {
+			return ""
+		}
+		if why := brScopeProblem(fn, v.Name); why != "" {
+			return why
+		}
+		locals, isParam, _, typ := brLocalsTyped(fn, v.Name)
+		if isParam {
+			// A reassigned numeric parameter still holds only a number.
+			if t, ok := typ.(*ast.Ident); ok && brNumericTypes[t.Name] {
+				return ""
+			}
+			return "parameter " + v.Name + " is not numeric or boolean"
+		}
+		if len(locals) > 0 {
+			for _, rhs := range locals {
+				if why := p.resolveData(rhs, fn, depth+1); why != "" {
+					return why
+				}
+			}
+			return ""
+		}
+		if c, ok := p.consts[v.Name]; ok {
+			return p.resolveData(c, nil, depth+1)
+		}
+		return "identifier " + v.Name + " is not a literal, constant or numeric value"
+	case *ast.CallExpr:
+		if id, ok := v.Fun.(*ast.Ident); ok && brTemplateDataFuncs[id.Name] != "" {
+			return ""
+		}
+		if sel, ok := v.Fun.(*ast.SelectorExpr); ok && brLiteralMethods[sel.Sel.Name] != "" && p.returnsOnlyLiterals(sel.Sel.Name) {
+			return ""
+		}
+		return "call " + brExprString(v.Fun) + " is not a listed data function or literal-returning method"
+	}
+	return fmt.Sprintf("%s is not a literal, constant or numeric value", brExprString(e))
+}
+
+// returnsOnlyLiterals reports whether every method named name in the
+// package returns only string literals.
+func (p *brPkg) returnsOnlyLiterals(name string) bool {
+	decls := p.funcs[name]
+	if len(decls) == 0 {
+		return false
+	}
+	for _, d := range decls {
+		ok := true
+		ast.Inspect(d.Body, func(n ast.Node) bool {
+			if r, isRet := n.(*ast.ReturnStmt); isRet {
+				if len(r.Results) != 1 {
+					ok = false
+				} else if lit, isLit := r.Results[0].(*ast.BasicLit); !isLit || lit.Kind != token.STRING {
+					ok = false
+				}
+			}
+			return true
+		})
+		if !ok {
+			return false
+		}
+	}
+	return true
 }
