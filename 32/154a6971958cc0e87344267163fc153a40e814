@@ -1,0 +1,19 @@
+receiver/postgresqlreceiver/dbm_sql_allowlist_test.go
+  s_f831f252c737d7::t_e9b7013714aa5e 17,414-449,460-463,468-523
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "32154a6971958cc0e87344267163fc153a40e814",
+  "prompts": {},
+  "sessions": {
+    "s_f831f252c737d7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1d17d887-0e27-40f9-aede-50f0536246af",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "oded-dd <oded@coralogix.com>"
+    }
+  }
+}
