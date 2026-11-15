@@ -14,7 +14,6 @@ package postgresqlreceiver
 // tests, so every fork rebase re-checks upstream's SQL (EC-08 drift guard).
 
 import (
-	"errors"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -39,7 +38,7 @@ var brForbiddenKeywords = map[string]bool{
 	"insert": true, "update": true, "delete": true, "merge": true, "truncate": true,
 	"create": true, "alter": true, "drop": true, "grant": true, "revoke": true,
 	"lock": true, "copy": true, "call": true, "do": true, "execute": true,
-	"prepare": true, "deallocate": true, "vacuum": true, "analyze": true,
+	"prepare": true, "deallocate": true, "vacuum": true, "analyze": true, "analyse": true, //nolint:misspell // PostgreSQL also accepts this spelling
 	"reindex": true, "cluster": true, "refresh": true, "listen": true,
 	"notify": true, "unlisten": true, "set": true, "reset": true, "discard": true,
 	"comment": true, "security": true, "import": true, "into": true, "for": true,
@@ -72,9 +71,11 @@ var brForbiddenNames = map[string]bool{
 // keyword, each matched on its whole normalised text (comments removed,
 // whitespace collapsed, lower case, Go format verbs kept). Only the listed
 // keywords are exempt, and only in that exact statement. They are the
-// receiver's EXPLAIN path (client.go explainQuery): a session-only setting
-// and a prepared statement on a dedicated connection, explained without
-// ANALYZE (the statement never runs) and deallocated.
+// receiver's EXPLAIN path (client.go explainQuery), on one connection taken
+// from the pool: SET plan_cache_mode (it stays set on that pooled connection
+// after it returns to the pool: a planner setting, no data change), a
+// prepared statement explained without ANALYZE (the statement never runs),
+// and DEALLOCATE.
 var brStatementExceptions = map[string][]string{
 	"set plan_cache_mode = force_generic_plan": {"set"},
 	"prepare otel_%s as %s":                    {"prepare"},
@@ -93,16 +94,58 @@ var brNonSQLLiterals = map[string]bool{
 }
 
 // brStatementStarters are the first words that make a string literal a SQL
-// statement for this test. A literal that starts with any other word (a log
-// message, a fragment) is checked for forbidden names only.
+// statement for this test: every PostgreSQL command word (review I1). A
+// literal that starts with any other word (a log message, a fragment) is
+// checked for forbidden names and denied functions only. Only SELECT, WITH,
+// SHOW, EXPLAIN and VALUES may start a statement the receiver sends.
 var brStatementStarters = map[string]bool{
-	"select": true, "with": true, "show": true, "explain": true, "values": true,
+	"abort": true, "alter": true, "analyse": true, "analyze": true, "begin": true, //nolint:misspell // PostgreSQL also accepts this spelling
+	"call": true, "checkpoint": true, "close": true, "cluster": true, "comment": true,
+	"commit": true, "copy": true, "create": true, "deallocate": true, "declare": true,
+	"delete": true, "discard": true, "do": true, "drop": true, "end": true,
+	"execute": true, "explain": true, "fetch": true, "grant": true, "import": true,
+	"insert": true, "listen": true, "load": true, "lock": true, "merge": true,
+	"move": true, "notify": true, "prepare": true, "reassign": true, "refresh": true,
+	"reindex": true, "release": true, "reset": true, "revoke": true, "rollback": true,
+	"savepoint": true, "security": true, "select": true, "set": true, "show": true,
+	"start": true, "table": true, "truncate": true, "unlisten": true, "update": true,
+	"vacuum": true, "values": true, "with": true,
 }
 
-func init() {
-	for k := range brForbiddenKeywords {
-		brStatementStarters[k] = true
-	}
+// brAllowedStarts are the only first words of a statement the receiver sends.
+var brAllowedStarts = map[string]bool{"select": true, "with": true, "show": true, "explain": true, "values": true}
+
+// brDeniedFunctions are writing, session-changing and admin functions
+// (review I2). They are rejected anywhere a name is followed by "(", also in
+// fragments, before the allow-list is consulted.
+var brDeniedFunctions = regexp.MustCompile(`^(.*_reset|set_config|setval|nextval|pg_(try_)?advisory_.*|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|pg_rotate_logfile|lo_.*|pg_read_(binary_)?file|pg_ls_.*|pg_file_.*|dblink.*|.*replication_slot.*|pg_logical_.*|pg_replication_origin_.*|pg_switch_wal|pg_promote|pg_create_restore_point|pg_backup_.*|txid_current|pg_current_xact_id|pg_sleep.*)$`)
+
+// brAllowedFunctions are the functions the receiver's SQL calls today
+// (review I2): any other function in a statement or template is rejected.
+// Extend it in a reviewed change.
+var brAllowedFunctions = map[string]bool{
+	"array_length": true, "array_to_string": true, "cardinality": true, "cast": true,
+	"clock_timestamp": true, "coalesce": true, "count": true, "current_database": true,
+	"current_setting": true, "extract": true, "lower": true, "max": true,
+	"pg_backend_pid": true, "pg_blocking_pids": true, "pg_current_wal_lsn": true,
+	"pg_database_size": true, "pg_relation_size": true, "pg_total_relation_size": true,
+	"pg_wal_lsn_diff": true, "regexp_match": true, "replace": true, "sum": true,
+	"to_char": true, "to_timestamp": true, "trim": true, "unnest": true,
+	// fork patch P7 (#48): the query-sample template reads octet_length(sa.query)
+	"octet_length": true,
+}
+
+// brKeywordsBeforeParen are SQL words that may precede "(" without being a
+// function call.
+var brKeywordsBeforeParen = map[string]bool{
+	"filter": true, "over": true, "in": true, "exists": true, "as": true,
+	"and": true, "or": true, "not": true, "where": true, "from": true,
+	"select": true, "on": true, "when": true, "then": true, "else": true,
+	"case": true, "values": true, "using": true, "lateral": true, "all": true,
+	"any": true, "some": true, "join": true, "with": true, "distinct": true, "by": true,
+	"having": true, "explain": true, "union": true, "except": true, "intersect": true,
+	"is": true, "like": true, "ilike": true, "between": true, "array": true, "row": true,
+	"limit": true, "offset": true, "nulls": true, "into": true, "returning": true,
 }
 
 // brSQLText is one SQL text found in the package.
@@ -117,7 +160,11 @@ type brViolation struct {
 }
 
 func (v brViolation) String() string {
-	return fmt.Sprintf("%s: %s (statement: %q)", v.origin, v.reason, v.statement)
+	stmt := v.statement
+	if len(stmt) > 160 {
+		stmt = stmt[:160] + "..."
+	}
+	return fmt.Sprintf("%s: %s (statement: %q)", v.origin, v.reason, stmt)
 }
 
 // collectReceiverSQL returns the templates and the folded string literals of
@@ -197,17 +244,123 @@ func brFold(e ast.Expr) (string, bool) {
 
 var (
 	brTemplateAction = regexp.MustCompile(`(?s)\{\{.*?\}\}`)
-	brBlockComment   = regexp.MustCompile(`(?s)/\*.*?\*/`)
-	brLineComment    = regexp.MustCompile(`--[^\n]*`)
 	brSpaces         = regexp.MustCompile(`\s+`)
+	brDollarTag      = regexp.MustCompile(`^\$[A-Za-z_]*\$`)
 )
 
-// brNormalize removes comments, collapses whitespace and lower-cases.
-func brNormalize(s string) string {
-	s = brBlockComment.ReplaceAllString(s, " ")
-	s = brLineComment.ReplaceAllString(s, " ")
-	s = brSpaces.ReplaceAllString(s, " ")
-	return strings.TrimSpace(strings.ToLower(s))
+func isIdentByte(c byte) bool {
+	return c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
+}
+
+// brStatements lexes SQL into its statements. Comments are removed outside
+// strings only (review M5); E” strings take backslash escapes (review M6);
+// E” and dollar-quoted bodies are written back as standard strings; text
+// outside strings is lower-cased; whitespace is collapsed. Statements are
+// split at semicolons outside strings. ok is false when a string, quoted
+// identifier, dollar quote or comment does not end.
+func brStatements(sql string) (stmts []string, ok bool) {
+	var b strings.Builder
+	flush := func() {
+		if st := strings.TrimSpace(brSpaces.ReplaceAllString(b.String(), " ")); st != "" {
+			stmts = append(stmts, st)
+		}
+		b.Reset()
+	}
+	quote := func(body string) string { return "'" + strings.ReplaceAll(body, "'", "''") + "'" }
+	n := len(sql)
+	for i := 0; i < n; {
+		c := sql[i]
+		switch {
+		case (c == 'e' || c == 'E') && i+1 < n && sql[i+1] == '\'' && (i == 0 || !isIdentByte(sql[i-1])):
+			var body strings.Builder
+			j, closed := i+2, false
+			for j < n && !closed {
+				switch {
+				case sql[j] == '\\' && j+1 < n:
+					body.WriteByte(sql[j+1])
+					j += 2
+				case sql[j] == '\'' && j+1 < n && sql[j+1] == '\'':
+					body.WriteByte('\'')
+					j += 2
+				case sql[j] == '\'':
+					closed = true
+					j++
+				default:
+					body.WriteByte(sql[j])
+					j++
+				}
+			}
+			if !closed {
+				return stmts, false
+			}
+			b.WriteString(quote(body.String()))
+			i = j
+		case c == '\'' || c == '"':
+			j, closed := i+1, false
+			for j < n && !closed {
+				switch {
+				case sql[j] == c && j+1 < n && sql[j+1] == c:
+					j += 2
+				case sql[j] == c:
+					closed = true
+					j++
+				default:
+					j++
+				}
+			}
+			if !closed {
+				return stmts, false
+			}
+			b.WriteString(sql[i:j])
+			i = j
+		case c == '$' && brDollarTag.MatchString(sql[i:]):
+			tag := brDollarTag.FindString(sql[i:])
+			end := strings.Index(sql[i+len(tag):], tag)
+			if end < 0 {
+				return stmts, false
+			}
+			b.WriteString(quote(sql[i+len(tag) : i+len(tag)+end]))
+			i += 2*len(tag) + end
+		case strings.HasPrefix(sql[i:], "--"):
+			for i < n && sql[i] != '\n' {
+				i++
+			}
+			b.WriteByte(' ')
+		case strings.HasPrefix(sql[i:], "/*"):
+			depth := 0
+			for {
+				if i >= n {
+					return stmts, false
+				}
+				open, closeHere := strings.HasPrefix(sql[i:], "/*"), strings.HasPrefix(sql[i:], "*/")
+				switch {
+				case open:
+					depth++
+					i += 2
+				case closeHere:
+					depth--
+					i += 2
+				default:
+					i++
+				}
+				if closeHere && depth == 0 {
+					break
+				}
+			}
+			b.WriteByte(' ')
+		case c == ';':
+			flush()
+			i++
+		default:
+			if c >= 'A' && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			b.WriteByte(c)
+			i++
+		}
+	}
+	flush()
+	return stmts, true
 }
 
 type brTok struct {
@@ -215,15 +368,14 @@ type brTok struct {
 	text string
 }
 
-// brTokenize splits normalised SQL into tokens. Unlike the sweep tokenizer it
-// accepts semicolons, dollar signs and backslashes, which the receiver's SQL
-// and Go format strings use; an unterminated string runs to the end.
+// brTokenize splits lower-cased SQL into tokens. An unterminated string runs
+// to the end (the lenient pass over any literal relies on this).
 func brTokenize(s string) []brTok {
 	var out []brTok
 	for i := 0; i < len(s); {
 		c := s[i]
 		switch {
-		case c == ' ':
+		case c == ' ' || c == '\t' || c == '\n' || c == '\r':
 			i++
 		case c == '\'' || c == '"':
 			j := i + 1
@@ -258,71 +410,115 @@ func brTokenize(s string) []brTok {
 	return out
 }
 
-// brIsStatement reports whether a Go literal starts like a SQL statement.
-func brIsStatement(s string) bool {
-	toks := brTokenize(brNormalize(s))
-	for _, t := range toks {
-		if t.kind == 'p' && t.text == "(" {
-			continue
+// brFirstWord returns the first word of a literal, after leading space,
+// comments and parentheses.
+func brFirstWord(s string) string {
+	for {
+		s = strings.TrimLeft(s, " \t\r\n(")
+		switch {
+		case strings.HasPrefix(s, "/*"):
+			end := strings.Index(s, "*/")
+			if end < 0 {
+				return ""
+			}
+			s = s[end+2:]
+		case strings.HasPrefix(s, "--"):
+			end := strings.IndexByte(s, '\n')
+			if end < 0 {
+				return ""
+			}
+			s = s[end+1:]
+		default:
+			j := 0
+			for j < len(s) && isIdentByte(s[j]) {
+				j++
+			}
+			return strings.ToLower(s[:j])
 		}
-		return t.kind == 'w' && brStatementStarters[t.text]
 	}
-	return false
 }
+
+// brNormalize returns the statements of s, normalised, joined by "; ".
+func brNormalize(s string) string {
+	stmts, _ := brStatements(s)
+	return strings.Join(stmts, "; ")
+}
+
+// brIsStatement reports whether a Go literal starts like a SQL statement.
+func brIsStatement(s string) bool { return brStatementStarters[brFirstWord(s)] }
 
 func isNotIdent(r rune) bool {
 	return r != '_' && (r < 'a' || r > 'z') && (r < '0' || r > '9')
 }
 
+// brNameAndFunctionViolations checks tokens for forbidden names and for
+// function calls: denied functions always, and, when allowList is set,
+// functions outside brAllowedFunctions.
+func brNameAndFunctionViolations(origin, stmt string, toks []brTok, allowList bool) []brViolation {
+	var out []brViolation
+	for i, tok := range toks {
+		switch tok.kind {
+		case 'w', 'q':
+			if brForbiddenNames[tok.text] {
+				out = append(out, brViolation{origin, stmt, "forbidden name " + tok.text})
+			}
+		case 's':
+			for _, w := range strings.FieldsFunc(strings.ToLower(tok.text), isNotIdent) {
+				if brForbiddenNames[w] {
+					out = append(out, brViolation{origin, stmt, "forbidden name " + w + " (in a string)"})
+				}
+			}
+		}
+		if tok.kind != 'w' || i+1 >= len(toks) || toks[i+1].kind != 'p' || toks[i+1].text != "(" {
+			continue
+		}
+		if brKeywordsBeforeParen[tok.text] || brStatementStarters[tok.text] {
+			continue
+		}
+		// A type modifier (::numeric(10,2), AS varchar(10)) is not a call.
+		if i > 0 && (toks[i-1].kind == 'p' && toks[i-1].text == ":" || toks[i-1].kind == 'w' && toks[i-1].text == "as") {
+			continue
+		}
+		switch {
+		case brDeniedFunctions.MatchString(tok.text):
+			out = append(out, brViolation{origin, stmt, "denied function " + tok.text})
+		case allowList && !brAllowedFunctions[tok.text]:
+			out = append(out, brViolation{origin, stmt, "function " + tok.text + " is not in the allow-list"})
+		}
+	}
+	return out
+}
+
 // checkSQL returns the violations of one SQL text. isTemplate marks a text
-// that is SQL as a whole (a template); a Go literal is checked for keywords
-// only when it starts like a statement.
+// that is SQL as a whole (a template); a Go literal is checked for keywords,
+// the statement start and the function allow-list only when it starts like
+// a statement. Forbidden names and denied functions are checked in every
+// text, over a lenient tokenization of the whole raw text (comments
+// included, so nothing hides in one).
 func checkSQL(t brSQLText, isTemplate bool) []brViolation {
 	text := t.text
 	if isTemplate {
 		text = brTemplateAction.ReplaceAllString(text, " ")
 	}
-	norm := brNormalize(text)
-	var out []brViolation
-	for _, tok := range brTokenize(norm) {
-		switch tok.kind {
-		case 'w', 'q':
-			if brForbiddenNames[tok.text] {
-				out = append(out, brViolation{t.origin, norm, "forbidden name " + tok.text})
-			}
-		case 's':
-			for _, w := range strings.FieldsFunc(tok.text, isNotIdent) {
-				if brForbiddenNames[w] {
-					out = append(out, brViolation{t.origin, norm, "forbidden name " + w + " (in a string)"})
-				}
-			}
-		}
-	}
-	if !isTemplate && (!brIsStatement(text) || brNonSQLLiterals[norm]) {
+	lenient := strings.TrimSpace(strings.ToLower(brSpaces.ReplaceAllString(text, " ")))
+	out := brNameAndFunctionViolations(t.origin, lenient, brTokenize(lenient), false)
+	if !isTemplate && (!brIsStatement(text) || brNonSQLLiterals[lenient]) {
 		return out
 	}
-	for stmt := range strings.SplitSeq(norm, ";") {
-		stmt = strings.TrimSpace(stmt)
-		if stmt == "" {
-			continue
-		}
+	stmts, ok := brStatements(text)
+	if !ok {
+		return append(out, brViolation{t.origin, lenient, "unterminated string, quoted identifier, dollar quote or comment"})
+	}
+	for _, stmt := range stmts {
 		exempt := map[string]bool{}
 		allowed, isException := brStatementExceptions[stmt]
 		for _, k := range allowed {
 			exempt[k] = true
 		}
 		toks := brTokenize(stmt)
-		first := ""
-		for _, tok := range toks {
-			if tok.kind == 'p' && tok.text == "(" {
-				continue
-			}
-			if tok.kind == 'w' {
-				first = tok.text
-			}
-			break
-		}
-		if !isException && first != "select" && first != "with" && first != "show" && first != "explain" && first != "values" {
+		out = append(out, brNameAndFunctionViolations(t.origin, stmt, toks, true)...)
+		first := brFirstWord(stmt)
+		if !isException && !brAllowedStarts[first] {
 			out = append(out, brViolation{t.origin, stmt, fmt.Sprintf("statement starts with %q, not SELECT, WITH, SHOW, EXPLAIN or VALUES", first)})
 		}
 		for i, tok := range toks {
@@ -382,7 +578,9 @@ func TestReceiverSQLAllowList(t *testing.T) {
 			violations = append(violations, v.String())
 		}
 	}
-	assert.Empty(t, violations, "BR-3: receiver SQL breaks the allow-list")
+	for _, v := range violations {
+		t.Errorf("BR-3: receiver SQL breaks the allow-list: %s", v)
+	}
 }
 
 // TestReceiverSQLAllowListRejects proves that checkSQL catches each class of
@@ -439,8 +637,8 @@ func TestReceiverSQLAllowListRejects(t *testing.T) {
 		{name: "denied function in a fragment", text: " AND pg_terminate_backend(pid)"},
 		{name: "function outside the allow-list", text: "SELECT pg_sleep(10)"},
 		// review I3: the British spelling
-		{name: "analyse", text: "ANALYSE t"},
-		{name: "explain analyse", text: "EXPLAIN ANALYSE SELECT 1"},
+		{name: "british spelling of analyze", text: "ANALYSE t"},                      //nolint:misspell // the PostgreSQL keyword under test
+		{name: "explain with the british spelling", text: "EXPLAIN ANALYSE SELECT 1"}, //nolint:misspell // the PostgreSQL keyword under test
 		// review M5: comment markers inside a string never hide what follows
 		{name: "dash-dash in a string", text: "SELECT '--', histogram_bounds FROM x"},
 		{name: "comment opener in a string", text: "SELECT '/*' AS a; DELETE FROM t; SELECT '*/'"},
@@ -511,12 +709,343 @@ func TestCallSiteCheckRejects(t *testing.T) {
 // brCallSite is one database call found by the call-site pass.
 type brCallSite struct{ origin, call string }
 
-// checkCallSites runs the call-site pass over the package's non-test files.
-func checkCallSites(_ string) ([]brCallSite, []brViolation, error) {
-	return nil, nil, errors.New("not implemented")
+// brSprintfExceptions are the only non-literal fmt.Sprintf arguments allowed
+// in SQL, keyed "<function>:<argument>", each with its reason (review I4).
+var brSprintfExceptions = map[string]string{
+	"explainQuery:normalizedQueryID": "the pg_stat_statements queryid ('-' replaced by '_') names the prepared statement",
+	"explainQuery:nullsString":       `"(null, ...)" built from literal nulls, one per parameter`,
+	"explainQuery:query":             "the monitored statement itself, prepared and explained without ANALYZE (EXPLAIN-path exception; P8 replaces this path)",
 }
 
-// checkCallSitesFiles runs the call-site pass over parsed files.
-func checkCallSitesFiles(_ *token.FileSet, _ []*ast.File) ([]brCallSite, []brViolation) {
-	return nil, nil
+// brSQLHelpers return the SQL of their first argument plus quoted literals.
+var brSQLHelpers = map[string]string{
+	"filterQueryByDatabases": "appends WHERE/AND datname IN (...) with database names quoted as literals by quoteDatabaseList, and GROUP BY datname",
+}
+
+// brDBMethods maps a database call to the index of its SQL argument.
+var brDBMethods = map[string]int{
+	"QueryContext": 1, "QueryRowContext": 1, "ExecContext": 1, "PrepareContext": 1,
+	"Query": 0, "QueryRow": 0, "Exec": 0, "Prepare": 0,
+}
+
+type brCall struct {
+	call *ast.CallExpr
+	fn   *ast.FuncDecl
+}
+
+type brPkg struct {
+	fset      *token.FileSet
+	consts    map[string]ast.Expr
+	embeds    map[string]bool // vars filled by //go:embed templates/...
+	templates map[string]bool // vars that parse an embedded template
+	calls     []brCall
+}
+
+// checkCallSites runs the call-site pass over the package's non-test files.
+func checkCallSites(dir string) ([]brCallSite, []brViolation, error) {
+	goFiles, err := filepath.Glob(filepath.Join(dir, "*.go"))
+	if err != nil {
+		return nil, nil, err
+	}
+	fset := token.NewFileSet()
+	var files []*ast.File
+	for _, path := range goFiles {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		f, parseErr := parser.ParseFile(fset, path, nil, parser.ParseComments|parser.SkipObjectResolution)
+		if parseErr != nil {
+			return nil, nil, parseErr
+		}
+		files = append(files, f)
+	}
+	sites, violations := checkCallSitesFiles(fset, files)
+	return sites, violations, nil
+}
+
+// checkCallSitesFiles runs the call-site pass over parsed files: every SQL
+// argument of a database call, sqlquery.NewDbClient and template Execute
+// must resolve to a literal, a constant, an embedded template or a listed
+// exception.
+func checkCallSitesFiles(fset *token.FileSet, files []*ast.File) ([]brCallSite, []brViolation) {
+	p := &brPkg{fset: fset, consts: map[string]ast.Expr{}, embeds: map[string]bool{}, templates: map[string]bool{}}
+	vars := map[string]ast.Expr{}
+	for _, f := range files {
+		for _, decl := range f.Decls {
+			switch d := decl.(type) {
+			case *ast.GenDecl:
+				for _, spec := range d.Specs {
+					vs, ok := spec.(*ast.ValueSpec)
+					if !ok {
+						continue
+					}
+					embedded := strings.Contains(d.Doc.Text(), "go:embed templates/") || strings.Contains(vs.Doc.Text(), "go:embed templates/")
+					if !embedded && d.Doc != nil {
+						for _, c := range d.Doc.List {
+							embedded = embedded || strings.HasPrefix(c.Text, "//go:embed templates/")
+						}
+					}
+					for i, name := range vs.Names {
+						switch {
+						case d.Tok == token.CONST && i < len(vs.Values):
+							p.consts[name.Name] = vs.Values[i]
+						case d.Tok == token.VAR && embedded:
+							p.embeds[name.Name] = true
+						case d.Tok == token.VAR && i < len(vs.Values):
+							vars[name.Name] = vs.Values[i]
+						}
+					}
+				}
+			case *ast.FuncDecl:
+				if d.Body == nil {
+					continue
+				}
+				fn := d
+				ast.Inspect(d.Body, func(n ast.Node) bool {
+					if c, ok := n.(*ast.CallExpr); ok {
+						p.calls = append(p.calls, brCall{c, fn})
+					}
+					return true
+				})
+			}
+		}
+	}
+	for name, init := range vars {
+		ast.Inspect(init, func(n ast.Node) bool {
+			if c, ok := n.(*ast.CallExpr); ok {
+				if sel, ok := c.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "Parse" && len(c.Args) == 1 {
+					if id, ok := c.Args[0].(*ast.Ident); ok && p.embeds[id.Name] {
+						p.templates[name] = true
+					}
+				}
+			}
+			return true
+		})
+	}
+
+	var sites []brCallSite
+	var violations []brViolation
+	for _, c := range p.calls {
+		sel, ok := c.call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			continue
+		}
+		origin := fset.Position(c.call.Pos()).String()
+		idx, isDB := brDBMethods[sel.Sel.Name]
+		if x, ok := sel.X.(*ast.Ident); ok && x.Name == "sqlquery" && sel.Sel.Name == "NewDbClient" {
+			idx, isDB = 1, true
+		}
+		if sel.Sel.Name == "Execute" {
+			sites = append(sites, brCallSite{origin, "Execute"})
+			if x, ok := sel.X.(*ast.Ident); !ok || !p.templates[x.Name] {
+				violations = append(violations, brViolation{origin, "Execute", "Execute on a value that is not an embedded SQL template"})
+			}
+			continue
+		}
+		if !isDB {
+			continue
+		}
+		sites = append(sites, brCallSite{origin, sel.Sel.Name})
+		if idx >= len(c.call.Args) {
+			violations = append(violations, brViolation{origin, sel.Sel.Name, "no SQL argument"})
+			continue
+		}
+		if why := p.resolve(c.call.Args[idx], c.fn, 0); why != "" {
+			violations = append(violations, brViolation{origin, sel.Sel.Name, why})
+		}
+	}
+	return sites, violations
+}
+
+func brExprString(e ast.Expr) string {
+	switch v := e.(type) {
+	case *ast.Ident:
+		return v.Name
+	case *ast.SelectorExpr:
+		return brExprString(v.X) + "." + v.Sel.Name
+	case *ast.CallExpr:
+		return brExprString(v.Fun) + "(...)"
+	}
+	return fmt.Sprintf("%T", e)
+}
+
+// resolve returns "" when e is SQL the allow-list scan sees, else why not.
+func (p *brPkg) resolve(e ast.Expr, fn *ast.FuncDecl, depth int) string {
+	if depth > 8 {
+		return "SQL argument resolves too deep"
+	}
+	switch v := e.(type) {
+	case *ast.BasicLit:
+		if v.Kind == token.STRING {
+			return ""
+		}
+		return "SQL argument is not a string"
+	case *ast.ParenExpr:
+		return p.resolve(v.X, fn, depth+1)
+	case *ast.BinaryExpr:
+		if v.Op != token.ADD {
+			return "SQL argument uses operator " + v.Op.String()
+		}
+		if why := p.resolve(v.X, fn, depth+1); why != "" {
+			return why
+		}
+		return p.resolve(v.Y, fn, depth+1)
+	case *ast.Ident:
+		return p.resolveIdent(v.Name, fn, depth)
+	case *ast.CallExpr:
+		return p.resolveCall(v, fn, depth)
+	}
+	return fmt.Sprintf("SQL argument %s is not a literal, constant, template or listed exception", brExprString(e))
+}
+
+func (p *brPkg) resolveIdent(name string, fn *ast.FuncDecl, depth int) string {
+	locals, isParam, paramIdx := brLocals(fn, name)
+	for _, rhs := range locals {
+		if why := p.resolve(rhs, fn, depth+1); why != "" {
+			return why
+		}
+	}
+	if isParam {
+		callers := p.callersOf(fn)
+		if len(callers) == 0 {
+			return fmt.Sprintf("parameter %s of %s has no caller in the package", name, fn.Name.Name)
+		}
+		for _, c := range callers {
+			if paramIdx >= len(c.call.Args) {
+				return fmt.Sprintf("call of %s lacks argument %d", fn.Name.Name, paramIdx)
+			}
+			if why := p.resolve(c.call.Args[paramIdx], c.fn, depth+1); why != "" {
+				return fmt.Sprintf("parameter %s of %s: %s", name, fn.Name.Name, why)
+			}
+		}
+	}
+	if len(locals) > 0 || isParam {
+		return ""
+	}
+	if v, ok := p.consts[name]; ok {
+		return p.resolve(v, nil, depth+1)
+	}
+	if p.embeds[name] {
+		return ""
+	}
+	return fmt.Sprintf("identifier %s is not a literal, constant, template or listed exception", name)
+}
+
+// locals returns every value assigned to name inside fn, and whether name is
+// a parameter of fn (and its index among the call arguments).
+func brLocals(fn *ast.FuncDecl, name string) ([]ast.Expr, bool, int) {
+	if fn == nil {
+		return nil, false, 0
+	}
+	var out []ast.Expr
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		switch s := n.(type) {
+		case *ast.AssignStmt:
+			for i, lhs := range s.Lhs {
+				id, ok := lhs.(*ast.Ident)
+				if !ok || id.Name != name {
+					continue
+				}
+				if len(s.Rhs) == len(s.Lhs) {
+					out = append(out, s.Rhs[i])
+				} else {
+					out = append(out, s.Rhs[0])
+				}
+			}
+		case *ast.ValueSpec:
+			for i, id := range s.Names {
+				if id.Name == name && i < len(s.Values) {
+					out = append(out, s.Values[i])
+				}
+			}
+		}
+		return true
+	})
+	idx := 0
+	for _, field := range fn.Type.Params.List {
+		if len(field.Names) == 0 {
+			idx++
+			continue
+		}
+		for _, id := range field.Names {
+			if id.Name == name {
+				return out, true, idx
+			}
+			idx++
+		}
+	}
+	return out, false, 0
+}
+
+func (p *brPkg) callersOf(fn *ast.FuncDecl) []brCall {
+	var out []brCall
+	for _, c := range p.calls {
+		switch f := c.call.Fun.(type) {
+		case *ast.Ident:
+			if fn.Recv == nil && f.Name == fn.Name.Name {
+				out = append(out, c)
+			}
+		case *ast.SelectorExpr:
+			if fn.Recv != nil && f.Sel.Name == fn.Name.Name {
+				out = append(out, c)
+			}
+		}
+	}
+	return out
+}
+
+func (p *brPkg) resolveCall(c *ast.CallExpr, fn *ast.FuncDecl, depth int) string {
+	name := brExprString(c.Fun)
+	switch {
+	case name == "fmt.Sprintf" && len(c.Args) > 0:
+		if why := p.resolve(c.Args[0], fn, depth+1); why != "" {
+			return why
+		}
+		for _, arg := range c.Args[1:] {
+			if id, ok := arg.(*ast.Ident); ok && fn != nil {
+				if _, listed := brSprintfExceptions[fn.Name.Name+":"+id.Name]; listed {
+					continue
+				}
+			}
+			if why := p.resolve(arg, fn, depth+1); why != "" {
+				return "fmt.Sprintf argument: " + why
+			}
+		}
+		return ""
+	case brSQLHelpers[name] != "" && len(c.Args) > 0:
+		return p.resolve(c.Args[0], fn, depth+1)
+	}
+	// buf.String() of a buffer that an embedded template wrote into.
+	if sel, ok := c.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "String" && fn != nil {
+		if buf, ok := sel.X.(*ast.Ident); ok && p.templateWrites(fn, buf.Name) {
+			return ""
+		}
+	}
+	return fmt.Sprintf("SQL argument %s is not a literal, constant, template or listed exception", name)
+}
+
+// templateWrites reports whether fn runs <template>.Execute(&buf, ...).
+func (p *brPkg) templateWrites(fn *ast.FuncDecl, buf string) bool {
+	found := false
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		c, ok := n.(*ast.CallExpr)
+		if !ok || len(c.Args) == 0 {
+			return true
+		}
+		sel, ok := c.Fun.(*ast.SelectorExpr)
+		if !ok || sel.Sel.Name != "Execute" {
+			return true
+		}
+		x, ok := sel.X.(*ast.Ident)
+		if !ok || !p.templates[x.Name] {
+			return true
+		}
+		if u, ok := c.Args[0].(*ast.UnaryExpr); ok && u.Op == token.AND {
+			if id, ok := u.X.(*ast.Ident); ok && id.Name == buf {
+				found = true
+			}
+		}
+		return true
+	})
+	return found
 }
