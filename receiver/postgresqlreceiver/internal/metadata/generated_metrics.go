@@ -164,6 +164,68 @@ var MapAttributeEvent = map[string]AttributeEvent{
 	"top_query":    AttributeEventTopQuery,
 }
 
+// AttributeExplainOutcome specifies the value explain_outcome attribute.
+type AttributeExplainOutcome int
+
+const (
+	_ AttributeExplainOutcome = iota
+	AttributeExplainOutcomeOk
+	AttributeExplainOutcomeNotEligible
+	AttributeExplainOutcomeSkippedNotEligible
+	AttributeExplainOutcomeRateLimited
+	AttributeExplainOutcomeInputRefused
+	AttributeExplainOutcomeTimeoutRefused
+	AttributeExplainOutcomePlanningFailed
+	AttributeExplainOutcomeError
+	AttributeExplainOutcomeStatementNotEligible
+	AttributeExplainOutcomeFunctionUnavailable
+	AttributeExplainOutcomeSkippedLocal
+)
+
+// String returns the string representation of the AttributeExplainOutcome.
+func (av AttributeExplainOutcome) String() string {
+	switch av {
+	case AttributeExplainOutcomeOk:
+		return "ok"
+	case AttributeExplainOutcomeNotEligible:
+		return "not_eligible"
+	case AttributeExplainOutcomeSkippedNotEligible:
+		return "skipped_not_eligible"
+	case AttributeExplainOutcomeRateLimited:
+		return "rate_limited"
+	case AttributeExplainOutcomeInputRefused:
+		return "input_refused"
+	case AttributeExplainOutcomeTimeoutRefused:
+		return "timeout_refused"
+	case AttributeExplainOutcomePlanningFailed:
+		return "planning_failed"
+	case AttributeExplainOutcomeError:
+		return "error"
+	case AttributeExplainOutcomeStatementNotEligible:
+		return "statement_not_eligible"
+	case AttributeExplainOutcomeFunctionUnavailable:
+		return "function_unavailable"
+	case AttributeExplainOutcomeSkippedLocal:
+		return "skipped_local"
+	}
+	return ""
+}
+
+// MapAttributeExplainOutcome is a helper map of string to AttributeExplainOutcome attribute value.
+var MapAttributeExplainOutcome = map[string]AttributeExplainOutcome{
+	"ok":                     AttributeExplainOutcomeOk,
+	"not_eligible":           AttributeExplainOutcomeNotEligible,
+	"skipped_not_eligible":   AttributeExplainOutcomeSkippedNotEligible,
+	"rate_limited":           AttributeExplainOutcomeRateLimited,
+	"input_refused":          AttributeExplainOutcomeInputRefused,
+	"timeout_refused":        AttributeExplainOutcomeTimeoutRefused,
+	"planning_failed":        AttributeExplainOutcomePlanningFailed,
+	"error":                  AttributeExplainOutcomeError,
+	"statement_not_eligible": AttributeExplainOutcomeStatementNotEligible,
+	"function_unavailable":   AttributeExplainOutcomeFunctionUnavailable,
+	"skipped_local":          AttributeExplainOutcomeSkippedLocal,
+}
+
 // AttributeOperation specifies the value operation attribute.
 type AttributeOperation int
 

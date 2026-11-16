@@ -19,8 +19,12 @@ func TestSetupTelemetry(t *testing.T) {
 	tb, err := metadata.NewTelemetryBuilder(testTel.NewTelemetrySettings())
 	require.NoError(t, err)
 	defer tb.Shutdown()
+	tb.PostgresqlExplainFunctionCalls.Add(context.Background(), 1)
 	tb.PostgresqlQueryObfuscationFailed.Add(context.Background(), 1)
 	tb.PostgresqlTopQueryCacheEvents.Add(context.Background(), 1)
+	AssertEqualPostgresqlExplainFunctionCalls(t, testTel,
+		[]metricdata.DataPoint[int64]{{Value: 1}},
+		metricdatatest.IgnoreTimestamp())
 	AssertEqualPostgresqlQueryObfuscationFailed(t, testTel,
 		[]metricdata.DataPoint[int64]{{Value: 1}},
 		metricdatatest.IgnoreTimestamp())

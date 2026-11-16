@@ -21,6 +21,22 @@ func NewSettings(tt *componenttest.Telemetry) receiver.Settings {
 	return set
 }
 
+func AssertEqualPostgresqlExplainFunctionCalls(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...metricdatatest.Option) {
+	want := metricdata.Metrics{
+		Name:        "otelcol_postgresql.explain_function.calls",
+		Description: "Number of plan requests handled with dbm.explain_function set, by outcome. not_eligible (SQLSTATE DBM20-DBM23, DBM15) and function_unavailable (the function is missing or not callable) stop calls to that database (skipped_not_eligible) until one probe call after the re-check interval. statement_not_eligible (DBM24-DBM26) is retried for that statement only after 24 hours. skipped_local statements are not SELECT or WITH and are not sent. rate_limited requests are retried on a later scrape. The statement text and server messages are never logged. [Development]",
+		Unit:        "{request}",
+		Data: metricdata.Sum[int64]{
+			Temporality: metricdata.CumulativeTemporality,
+			IsMonotonic: true,
+			DataPoints:  dps,
+		},
+	}
+	got, err := tt.GetMetric("otelcol_postgresql.explain_function.calls")
+	require.NoError(t, err)
+	metricdatatest.AssertEqual(t, want, got, opts...)
+}
+
 func AssertEqualPostgresqlQueryObfuscationFailed(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...metricdatatest.Option) {
 	want := metricdata.Metrics{
 		Name:        "otelcol_postgresql.query.obfuscation.failed",

@@ -87,6 +87,9 @@ type client interface {
 	getStatStatementsInfo(ctx context.Context) (statStatementsInfo, error)
 	getStatStatementsCapabilities(ctx context.Context) (serverVersionNum int64, extVersion string, err error)
 	explainQuery(ctx context.Context, query, queryID string, logger *zap.Logger) (string, error)
+	// explainViaFunction gets the plan of the pg_stat_statements entry
+	// queryID from the explain function (DBM fork patch P8).
+	explainViaFunction(ctx context.Context, queryID string, opts explainFunctionOptions, logger *zap.Logger) (string, error)
 }
 
 type postgreSQLClient struct {

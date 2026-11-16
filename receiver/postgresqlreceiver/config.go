@@ -98,6 +98,28 @@ type DBMConfig struct {
 	// unless a Full capture lease applies, so it must run in every pipeline
 	// that receives these records.
 	AllowLiteralCapture bool `mapstructure:"allow_literal_capture"`
+	// ExplainFunction, when set, makes the receiver get each estimated plan
+	// by calling this function (DBM fork patch P8) instead of running its own
+	// PREPARE and EXPLAIN. The only accepted value is
+	// coralogix_dbm.explain_statement (grants/postgres-plans-definer.sql).
+	// There is no fallback: when the call fails, that statement gets no plan.
+	ExplainFunction string `mapstructure:"explain_function"`
+	// ExplainFunctionTimeout is the statement_timeout set for each call,
+	// 1ms to 2s (the function refuses any other value). 0 means 1s.
+	ExplainFunctionTimeout time.Duration `mapstructure:"explain_function_timeout"`
+	// ExplainFunctionSchemas, when set, is passed to the function as its
+	// schemas argument (at most 16 names), so that unqualified table names
+	// resolve in these schemas. Every name must be in the install's
+	// dbm_plan_schemas list, else the function refuses the database (DBM15).
+	// An empty list is the same as none.
+	ExplainFunctionSchemas []string `mapstructure:"explain_function_schemas"`
+	// ExplainFunctionMaxCallsPerMinute caps the calls to the function at this
+	// many in any 60 s window, 1 to 600. 0 means 30.
+	ExplainFunctionMaxCallsPerMinute int `mapstructure:"explain_function_max_calls_per_minute"`
+	// ExplainFunctionRecheckInterval is how long a database gets no calls
+	// after the function refused it or was not callable, before one probe
+	// call is allowed. At least 5m. 0 means 1h.
+	ExplainFunctionRecheckInterval time.Duration `mapstructure:"explain_function_recheck_interval"`
 	// prevent unkeyed literal initialization
 	_ struct{}
 }
@@ -192,6 +214,10 @@ func (cfg *Config) Validate() error {
 	if cfg.TopQueryCollection.CandidateOrder.column() == "" {
 		err = multierr.Append(err, fmt.Errorf("invalid config: 'top_query_collection.candidate_order' must be %q or %q, got %q",
 			TopQueryCandidateOrderCalls, TopQueryCandidateOrderTotalTime, cfg.TopQueryCollection.CandidateOrder))
+	}
+
+	if explainErr := cfg.DBM.validateExplainFunction(); explainErr != nil {
+		err = multierr.Append(err, explainErr)
 	}
 
 	if cfg.LogsBuilderConfig.Events.DbServerQueryPlan.Enabled && !cfg.LogsBuilderConfig.Events.DbServerTopQuery.Enabled {

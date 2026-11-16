@@ -759,6 +759,20 @@ top query
 
 The following telemetry is emitted by this component.
 
+### otelcol_postgresql.explain_function.calls
+
+Number of plan requests handled with dbm.explain_function set, by outcome. not_eligible (SQLSTATE DBM20-DBM23, DBM15) and function_unavailable (the function is missing or not callable) stop calls to that database (skipped_not_eligible) until one probe call after the re-check interval. statement_not_eligible (DBM24-DBM26) is retried for that statement only after 24 hours. skipped_local statements are not SELECT or WITH and are not sent. rate_limited requests are retried on a later scrape. The statement text and server messages are never logged.
+
+| Unit | Metric Type | Value Type | Monotonic | Stability |
+| ---- | ----------- | ---------- | --------- | --------- |
+| {request} | Sum | Int | true | Development |
+
+#### Attributes
+
+| Name | Description | Values | Semantic Convention |
+| ---- | ----------- | ------ | ------------------- |
+| explain_outcome | The result of one statement's plan request to the explain function (DBM fork patch P8). | Str: ``ok``, ``not_eligible``, ``skipped_not_eligible``, ``rate_limited``, ``input_refused``, ``timeout_refused``, ``planning_failed``, ``error``, ``statement_not_eligible``, ``function_unavailable``, ``skipped_local`` | - |
+
 ### otelcol_postgresql.query.obfuscation.failed
 
 Number of statements whose text failed obfuscation, by event. The record then carries an empty db.query.text, and the statement text is never logged.

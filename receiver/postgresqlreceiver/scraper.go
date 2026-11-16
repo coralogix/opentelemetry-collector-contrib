@@ -92,6 +92,15 @@ type postgreSQLScraper struct {
 	lastStatsReset  time.Time
 	lastDealloc     int64
 	telemetry       *metadata.TelemetryBuilder
+	// explainLimiter rate-limits explain-function calls; explainNotEligible
+	// maps each database the explain function refused (database level) to
+	// the time its probe call is allowed. [DBM P8]
+	explainLimiter     *explainRateLimiter
+	explainNotEligible map[string]time.Time
+	// explainNoPlan maps the statements the explain function refused
+	// (DBM24-DBM26), keyed like the plan cache, to when they may be
+	// requested again (24 h later).
+	explainNoPlan *expirable.LRU[string, time.Time]
 	// if enabled, uses a separated attribute for the schema
 	separateSchemaAttr     bool
 	useOTelSemconv         bool
@@ -174,6 +183,9 @@ func newPostgreSQLScraper(
 		excludes:           excludes,
 		cache:              cache,
 		telemetry:          telemetryBuilder,
+		explainLimiter:     newExplainRateLimiter(config.DBM.explainFunctionMaxCallsPerMinute()),
+		explainNotEligible: map[string]time.Time{},
+		explainNoPlan:      newTTLCache[time.Time](explainNoPlanSize, 0),
 		now:                time.Now,
 		queryPlanCache:     queryPlanCache,
 		separateSchemaAttr: separateSchemaAttr,
@@ -730,7 +742,14 @@ func (p *postgreSQLScraper) collectTopQuery(ctx context.Context, clientFactory p
 		if inTopN {
 			plan, ok = p.queryPlanCache.Get(planCacheKey)
 		}
-		if inTopN && !ok && explained < maxExplainEachInterval {
+		if inTopN && !ok && explained < maxExplainEachInterval && p.config.DBM.ExplainFunction != "" {
+			// [DBM P8] the explain function, never the receiver's own EXPLAIN.
+			var called bool
+			plan, called = p.planFromFunction(ctx, clientFactory, database, rawQuery, queryID, planCacheKey, logger)
+			if called {
+				explained++
+			}
+		} else if inTopN && !ok && explained < maxExplainEachInterval {
 			dbClient, err := clientFactory.getClient(ctx, database)
 			if err == nil {
 				plan, err = dbClient.explainQuery(ctx, rawQuery, queryID, logger)
