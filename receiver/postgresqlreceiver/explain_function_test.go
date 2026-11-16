@@ -244,15 +244,51 @@ func TestExplainFunctionOutcome(t *testing.T) {
 func TestExplainRateLimiter(t *testing.T) {
 	t0 := time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC)
 	l := newExplainRateLimiter(2)
-	assert.True(t, l.allow(t0), "starts with one call")
-	assert.False(t, l.allow(t0), "no burst: calls are evenly spaced")
-	assert.False(t, l.allow(t0.Add(29*time.Second)))
-	assert.True(t, l.allow(t0.Add(30*time.Second)), "one call per 30s at 2 per minute")
-	assert.False(t, l.allow(t0.Add(30*time.Second)))
-	later := t0.Add(10 * time.Minute)
-	assert.True(t, l.allow(later))
-	assert.False(t, l.allow(later), "idle time does not build a burst")
-	assert.False(t, l.allow(t0), "a clock step back adds nothing")
+	assert.True(t, l.allow(t0), "N calls may come back to back")
+	assert.True(t, l.allow(t0))
+	assert.False(t, l.allow(t0), "never more than N in 60 s")
+	assert.False(t, l.allow(t0.Add(59*time.Second)))
+	assert.True(t, l.allow(t0.Add(60*time.Second)), "the oldest call is 60 s old")
+	assert.True(t, l.allow(t0.Add(60*time.Second)))
+	assert.False(t, l.allow(t0.Add(60*time.Second)))
+	assert.False(t, l.allow(t0), "a clock step back allows nothing")
+}
+
+// TestExplainRateLimiterWindow (re-review of #50): a sliding window of the
+// last N call times. With a frozen clock inside each scrape, every scrape 60
+// s apart gets N calls, and no trailing 60 s window ever holds more than N.
+func TestExplainRateLimiterWindow(t *testing.T) {
+	for _, n := range []int{1, 7, 30, 600} {
+		l := newExplainRateLimiter(n)
+		start := time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC)
+		var calls []time.Time
+		for scrape := range 5 {
+			now := start.Add(time.Duration(scrape) * time.Minute)
+			got := 0
+			for range 1000 {
+				if l.allow(now) {
+					got++
+					calls = append(calls, now)
+				}
+			}
+			assert.Equal(t, n, got, "n=%d scrape %d", n, scrape)
+		}
+		// Attempts every 15 ms with a moving clock never exceed the window.
+		now := start.Add(10 * time.Minute)
+		for range 20000 {
+			if l.allow(now) {
+				calls = append(calls, now)
+			}
+			now = now.Add(15 * time.Millisecond)
+		}
+		for i := range calls {
+			inWindow := 0
+			for j := i; j < len(calls) && calls[j].Sub(calls[i]) < time.Minute; j++ {
+				inWindow++
+			}
+			require.LessOrEqual(t, inWindow, n, "n=%d: more than N calls in a 60 s window", n)
+		}
+	}
 }
 
 // TestExplainRateLimiterIsTrueN: with an attempt every millisecond, exactly N
@@ -700,4 +736,70 @@ func TestTopQueryExplainFunctionStatementRetryAfter24h(t *testing.T) {
 	logs := scrape() // retried once after 24 h
 	assert.Equal(t, map[string]string{"4242": p8ObfuscatedPlan(t)}, queryPlans(logs))
 	h.assertCalls(t, map[string]int64{"statement_not_eligible": 1, "ok": 1})
+}
+
+// TestTopQueryExplainFunctionProbeClearRule (re-review of #50): a probe
+// clears the not-eligible state only when the function evidently ran for
+// this database (ok, statement refused, planning failed, DBM12-DBM14,
+// DBM16). On a transport or other error, a timeout refusal or DBM11 the
+// state is kept and the re-check interval starts again.
+func TestTopQueryExplainFunctionProbeClearRule(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		err   error
+		clear bool
+	}{
+		{name: "ok", clear: true},
+		{name: "DBM24", err: p8PQError("DBM24"), clear: true},
+		{name: "DBM30", err: p8PQError("DBM30"), clear: true},
+		{name: "DBM12", err: p8PQError("DBM12"), clear: true},
+		{name: "DBM13", err: p8PQError("DBM13"), clear: true},
+		{name: "DBM14", err: p8PQError("DBM14"), clear: true},
+		{name: "DBM16", err: p8PQError("DBM16"), clear: true},
+		{name: "57014", err: p8PQError("57014")},
+		{name: "DBM10", err: p8PQError("DBM10")},
+		{name: "DBM11", err: p8PQError("DBM11")},
+		{name: "network", err: errors.New("read tcp: connection reset " + p7Literal)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newP8Harness(t, DBMConfig{ExplainFunction: explainFunctionName, ExplainFunctionRecheckInterval: 10 * time.Minute})
+			now := time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC)
+			h.scraper.now = func() time.Time { return now }
+			scrape := func(id string) {
+				t.Helper()
+				primeTopQueryCache(h.scraper, "postgres", "10", id)
+				h.scraper.queryPlanCache.Purge()
+				h.mock.ExpectQuery("LIMIT 10").WillReturnRows(sqlmock.NewRows(topQueryColumns).AddRow(p8TopQueryRow(id, p8Statement, "10")...))
+				_, err := h.scraper.scrapeTopQuery(t.Context(), 10, 10, 10, 0)
+				require.NoError(t, err)
+				require.NoError(t, h.mock.ExpectationsWereMet())
+			}
+			h.expectCall(1000, 1).WillReturnError(p8PQError("DBM21"))
+			scrape("1")
+			now = now.Add(11 * time.Minute)
+			probe := h.expectCall(1000, 2)
+			if tc.err == nil {
+				probe.WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(p8Plan))
+			} else {
+				probe.WillReturnError(tc.err)
+			}
+			scrape("2") // the probe
+			now = now.Add(time.Minute)
+			if tc.clear {
+				h.expectCall(1000, 3).WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(p8Plan))
+			}
+			scrape("3") // cleared: called; kept: skipped (re-armed for 10 min)
+			up := h.observed.FilterMessage("plans available again from the explain function").AllUntimed()
+			if tc.clear {
+				assert.Len(t, up, 1)
+			} else {
+				assert.Empty(t, up)
+				now = now.Add(10 * time.Minute)
+				h.expectCall(1000, 4).WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(p8Plan))
+				scrape("4") // the next probe, after a full interval from the failed one
+			}
+			assert.Len(t, h.observed.FilterMessage("plans unavailable: database not eligible for the explain function").AllUntimed(), 1)
+			assertNoStatementText(t, h.observed)
+		})
+	}
 }
