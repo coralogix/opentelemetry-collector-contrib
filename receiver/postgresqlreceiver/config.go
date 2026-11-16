@@ -113,8 +113,8 @@ type DBMConfig struct {
 	// dbm_plan_schemas list, else the function refuses the database (DBM15).
 	// An empty list is the same as none.
 	ExplainFunctionSchemas []string `mapstructure:"explain_function_schemas"`
-	// ExplainFunctionMaxCallsPerMinute caps the calls to the function, evenly
-	// spaced, 1 to 600 per minute. 0 means 30.
+	// ExplainFunctionMaxCallsPerMinute caps the calls to the function at this
+	// many in any 60 s window, 1 to 600. 0 means 30.
 	ExplainFunctionMaxCallsPerMinute int `mapstructure:"explain_function_max_calls_per_minute"`
 	// ExplainFunctionRecheckInterval is how long a database gets no calls
 	// after the function refused it or was not callable, before one probe

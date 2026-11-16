@@ -176,6 +176,21 @@ func explainFunctionOutcome(err error) metadata.AttributeExplainOutcome {
 	return metadata.AttributeExplainOutcomeError
 }
 
+// explainProbeClears reports whether a probe result shows that the function
+// ran for this database: ok, a statement-level refusal, a planning failure,
+// or an input refusal past the size check (DBM12-DBM14, DBM16). A transport
+// or other error, a timeout refusal (DBM10, 57014) or DBM11 does not.
+func explainProbeClears(outcome metadata.AttributeExplainOutcome, err error) bool {
+	switch outcome {
+	case metadata.AttributeExplainOutcomeOk, metadata.AttributeExplainOutcomeStatementNotEligible, metadata.AttributeExplainOutcomePlanningFailed:
+		return true
+	case metadata.AttributeExplainOutcomeInputRefused:
+		pqErr, ok := errors.AsType[*pq.Error](err)
+		return ok && pqErr.Code != "DBM11"
+	}
+	return false
+}
+
 // explainFunctionHint is a fixed hint for a database-level refusal.
 func explainFunctionHint(sqlState string) string {
 	switch sqlState {
@@ -197,37 +212,35 @@ func explainFunctionHint(sqlState string) string {
 	return ""
 }
 
-// explainRateLimiter allows maxPerMinute calls per minute, evenly spaced
-// (C14): a token bucket with room for one call, refilled at maxPerMinute per
-// minute, so idle time never builds a burst. Credit is kept as a duration,
-// so the arithmetic is exact: one call costs a minute divided by
-// maxPerMinute.
+// explainRateLimiter allows at most maxPerMinute calls in any 60 s window
+// (C14), exactly: a sliding-window log, a ring of the last maxPerMinute call
+// times. A call is allowed while fewer than maxPerMinute calls were made, or
+// when the oldest of the last maxPerMinute is at least 60 s old. So up to N
+// calls may come back to back inside one scrape. Memory: at most 600 times.
 type explainRateLimiter struct {
-	cost     time.Duration
-	capacity time.Duration
-	credit   time.Duration
-	last     time.Time
+	calls []time.Time // ring of the last len(calls) call times
+	next  int         // index of the oldest call once the ring is full
+	full  bool
 }
+
+const explainRateWindow = time.Minute
 
 func newExplainRateLimiter(maxPerMinute int) *explainRateLimiter {
-	n := time.Duration(max(maxPerMinute, 1))
-	cost := time.Minute / n
-	return &explainRateLimiter{cost: cost, capacity: cost, credit: cost}
+	return &explainRateLimiter{calls: make([]time.Time, max(maxPerMinute, 1))}
 }
 
-// allow takes one call's credit if it is available at now.
+// allow records a call at now if the window allows it.
 func (l *explainRateLimiter) allow(now time.Time) bool {
-	if l.last.IsZero() {
-		l.last = now
-	}
-	if elapsed := now.Sub(l.last); elapsed > 0 {
-		l.credit = min(l.capacity, l.credit+elapsed)
-		l.last = now
-	}
-	if l.credit < l.cost {
+	if l.full && now.Sub(l.calls[l.next]) < explainRateWindow {
+		// Also refuses when the clock stepped back (a negative age).
 		return false
 	}
-	l.credit -= l.cost
+	l.calls[l.next] = now
+	l.next++
+	if l.next == len(l.calls) {
+		l.next = 0
+		l.full = true
+	}
 	return true
 }
 
@@ -330,6 +343,9 @@ func (p *postgreSQLScraper) planFromFunction(ctx context.Context, clientFactory 
 	}
 	dbClient, err := clientFactory.getClient(ctx, database)
 	if err != nil {
+		if probe {
+			p.explainNotEligible[database] = now.Add(p.config.DBM.explainFunctionRecheckInterval())
+		}
 		p.recordExplainOutcome(ctx, metadata.AttributeExplainOutcomeError)
 		logger.Error("failed to get a client for the explain function", append([]zap.Field{zap.String("queryID", queryID)}, sqlErrorFields(err)...)...)
 		return "", false
@@ -358,8 +374,14 @@ func (p *postgreSQLScraper) planFromFunction(ctx context.Context, clientFactory 
 		return "", true
 	}
 	if probe {
-		delete(p.explainNotEligible, database)
-		logger.Warn("plans available again from the explain function", zap.String("database", database))
+		if !explainProbeClears(outcome, err) {
+			// The function did not evidently run for this database: keep
+			// the state and start the re-check interval again, silently.
+			p.explainNotEligible[database] = now.Add(p.config.DBM.explainFunctionRecheckInterval())
+		} else {
+			delete(p.explainNotEligible, database)
+			logger.Warn("plans available again from the explain function", zap.String("database", database))
+		}
 	}
 	if outcome == metadata.AttributeExplainOutcomeStatementNotEligible {
 		p.explainNoPlan.Add(planCacheKey, now.Add(explainNoPlanRetry))

@@ -212,8 +212,8 @@ only in a pipeline that runs that processor before any exporter. Without it, kee
   install's `dbm_plan_schemas` list; otherwise the function refuses the database (`DBM15`). An empty
   list is the same as none.
 - `dbm.explain_function_max_calls_per_minute`: (optional, default=`30`, maximum `600`) At most this
-  many calls per minute, evenly spaced (no burst). A statement that is rate limited is tried again on a
-  later scrape.
+  many calls in any 60 s window; they may come back to back within one scrape. A statement that is
+  rate limited is tried again on a later scrape.
 - `dbm.explain_function_recheck_interval`: (optional, default=`1h`, minimum `5m`) How long a database
   gets no calls after the function refused it, before one probe call is allowed.
 
@@ -240,8 +240,10 @@ called (`42883` function missing, `3F000` schema missing, `42501` no EXECUTE), t
 warning, `plans unavailable: database not eligible for the explain function`, with the SQLSTATE and a
 hint (for example `use a clean connection` for `DBM20` and `DBM22`, or `see
 coralogix_dbm.explain_preflight_report()` for `DBM21`). It then makes no call to that database until
-`dbm.explain_function_recheck_interval` has passed, then one probe call. When the probe succeeds, it
-logs `plans available again from the explain function`. When the function refuses one statement
+`dbm.explain_function_recheck_interval` has passed, then one probe call. When the probe shows that the
+function ran (a plan, a statement-level refusal, a planning failure, or `DBM12` to `DBM14` / `DBM16`),
+it logs `plans available again from the explain function`; otherwise (a transport error, `57014`,
+`DBM10`, `DBM11`) the database stays unavailable for another interval. When the function refuses one statement
 (`DBM24` no application statement with that queryid, `DBM25` several texts), that statement is not
 requested again for 24 hours (at most 10,000 statements are remembered). This one retry per statement
 per 24 hours is a deliberate, bounded exception to "never retry a `DBM2x` code". The counter `otelcol_postgresql.explain_function.calls` (attribute `explain_outcome`)
