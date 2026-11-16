@@ -91,7 +91,7 @@ func (c *postgreSQLClient) explainViaFunction(ctx context.Context, queryID strin
 	}
 
 	var raw sql.NullString
-	if err = tx.QueryRowContext(ctx, explainFunctionCallSQL, id, pq.Array(opts.schemas)).Scan(&raw); err != nil {
+	if err := tx.QueryRowContext(ctx, explainFunctionCallSQL, id, pq.Array(opts.schemas)).Scan(&raw); err != nil {
 		return "", err
 	}
 	if !raw.Valid || raw.String == "" {
