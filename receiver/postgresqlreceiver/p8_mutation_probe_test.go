@@ -70,7 +70,7 @@ func TestP8MutationProbe(t *testing.T) {
 		{"R13-no-default-recheck", "explain_function.go", "\t\treturn defaultExplainFunctionRecheckInterval\n", "\t\treturn 0\n", "TestExplainFunctionOptionsDefaults"},
 		{"R14-recheck-minimum-unchecked", "explain_function.go", "r != 0 && r < minExplainFunctionRecheckInterval", "r < 0", "TestExplainFunctionConfigValidate"},
 		{"R15-empty-schemas-sent", "explain_function.go", "if len(cfg.ExplainFunctionSchemas) > 0 {\n\t\topts.schemas", "if true {\n\t\topts.schemas", "TestExplainFunctionOptionsDefaults"},
-		{"R16-refused-statement-retried-at-once", "explain_function.go", "if now.Before(retryAt) {", "if false {", "TestTopQueryExplainFunctionStatementNotEligible|TestTopQueryExplainFunctionStatementRetryAfter24h"},
+		{"R16-refused-statement-retried-at-once", "explain_function.go", "if now.Before(retryAt) {", "if now.Before(retryAt) && false {", "TestTopQueryExplainFunctionStatementNotEligible|TestTopQueryExplainFunctionStatementRetryAfter24h"},
 		{"R17-refused-statement-never-retried", "explain_function.go", "explainNoPlanRetry = 24 * time.Hour", "explainNoPlanRetry = 1000 * time.Hour", "TestTopQueryExplainFunctionStatementRetryAfter24h"},
 	}
 	control := exec.Command("go", "test", "-count=1", "-run", "^(TestExplain|TestTopQueryExplainFunction)", ".")
