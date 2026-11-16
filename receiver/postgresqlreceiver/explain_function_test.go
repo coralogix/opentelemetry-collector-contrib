@@ -745,21 +745,22 @@ func TestTopQueryExplainFunctionStatementRetryAfter24h(t *testing.T) {
 // state is kept and the re-check interval starts again.
 func TestTopQueryExplainFunctionProbeClearRule(t *testing.T) {
 	for _, tc := range []struct {
-		name  string
-		err   error
-		clear bool
+		name    string
+		err     error
+		clear   bool
+		outcome string
 	}{
-		{name: "ok", clear: true},
-		{name: "DBM24", err: p8PQError("DBM24"), clear: true},
-		{name: "DBM30", err: p8PQError("DBM30"), clear: true},
-		{name: "DBM12", err: p8PQError("DBM12"), clear: true},
-		{name: "DBM13", err: p8PQError("DBM13"), clear: true},
-		{name: "DBM14", err: p8PQError("DBM14"), clear: true},
-		{name: "DBM16", err: p8PQError("DBM16"), clear: true},
-		{name: "57014", err: p8PQError("57014")},
-		{name: "DBM10", err: p8PQError("DBM10")},
-		{name: "DBM11", err: p8PQError("DBM11")},
-		{name: "network", err: errors.New("read tcp: connection reset " + p7Literal)},
+		{name: "ok", clear: true, outcome: "ok"},
+		{name: "DBM24", err: p8PQError("DBM24"), clear: true, outcome: "statement_not_eligible"},
+		{name: "DBM30", err: p8PQError("DBM30"), clear: true, outcome: "planning_failed"},
+		{name: "DBM12", err: p8PQError("DBM12"), clear: true, outcome: "input_refused"},
+		{name: "DBM13", err: p8PQError("DBM13"), clear: true, outcome: "input_refused"},
+		{name: "DBM14", err: p8PQError("DBM14"), clear: true, outcome: "input_refused"},
+		{name: "DBM16", err: p8PQError("DBM16"), clear: true, outcome: "input_refused"},
+		{name: "57014", err: p8PQError("57014"), outcome: "error"},
+		{name: "DBM10", err: p8PQError("DBM10"), outcome: "timeout_refused"},
+		{name: "DBM11", err: p8PQError("DBM11"), outcome: "input_refused"},
+		{name: "network", err: errors.New("read tcp: connection reset " + p7Literal), outcome: "error"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newP8Harness(t, DBMConfig{ExplainFunction: explainFunctionName, ExplainFunctionRecheckInterval: 10 * time.Minute})
@@ -799,6 +800,17 @@ func TestTopQueryExplainFunctionProbeClearRule(t *testing.T) {
 				scrape("4") // the next probe, after a full interval from the failed one
 			}
 			assert.Len(t, h.observed.FilterMessage("plans unavailable: database not eligible for the explain function").AllUntimed(), 1)
+			// Every outcome, so that an extra call (which sqlmock answers with
+			// an error) is caught too.
+			want := map[string]int64{"not_eligible": 1}
+			want[tc.outcome]++
+			if tc.clear {
+				want["ok"]++
+			} else {
+				want["skipped_not_eligible"]++
+				want["ok"]++
+			}
+			h.assertCalls(t, want)
 			assertNoStatementText(t, h.observed)
 		})
 	}
