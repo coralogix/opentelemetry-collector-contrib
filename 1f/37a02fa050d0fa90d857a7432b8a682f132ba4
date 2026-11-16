@@ -1,0 +1,23 @@
+.chloggen/postgresqlreceiver-explain-function.yaml
+  s_f831f252c737d7::t_55a8269e1cb1d7 10
+receiver/postgresqlreceiver/README.md
+  s_f831f252c737d7::t_fe4a5669bc19be 225-228
+receiver/postgresqlreceiver/explain_function.go
+  s_f831f252c737d7::t_f12dfef4310f34 11,41-45,47-48,51-54,72-100,104-105,143-145,165-166,275-277
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1f37a02fa050d0fa90d857a7432b8a682f132ba4",
+  "prompts": {},
+  "sessions": {
+    "s_f831f252c737d7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1d17d887-0e27-40f9-aede-50f0536246af",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "oded-dd <oded@coralogix.com>"
+    }
+  }
+}
