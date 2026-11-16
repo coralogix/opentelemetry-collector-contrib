@@ -227,11 +227,13 @@ Each call runs in its own read-only transaction: `SET LOCAL statement_timeout`, 
 function reads the statement from `pg_stat_statements` itself. Only `SELECT` and `WITH` statements
 are requested. Errors are logged by
 SQLSTATE only, never by message or statement text. When the function refuses the database itself
-(SQLSTATE `DBM2x`, for example an untrusted role that can create objects), the receiver logs one
-warning, `plans unavailable: database not eligible for the explain function`, and stops calling the
-function for that database until it restarts. The counter `otelcol_postgresql.explain_function.calls`
+(SQLSTATE `DBM20` to `DBM23`, for example an untrusted role that can create objects), the receiver logs
+one warning, `plans unavailable: database not eligible for the explain function`, and stops calling
+the function for that database until it restarts. When it refuses one statement (`DBM24` to `DBM26`;
+`DBM26` is a statement with `$n` parameters before PostgreSQL 16), that statement is not requested
+again. The counter `otelcol_postgresql.explain_function.calls`
 (attribute `explain_outcome`) reports every outcome, including `not_eligible`,
-`skipped_not_eligible` and `rate_limited`.
+`skipped_not_eligible`, `statement_not_eligible` and `rate_limited`.
 
 ### Top Query Collection
 We provide functionality to collect the most executed queries from PostgreSQL. It will get data from `pg_stat_statements` and report incremental value of `total_exec_time`, `total_plan_time`, `calls`, `rows`, `shared_blks_dirtied`, `shared_blks_hit`, `shared_blks_read`, `shared_blks_written`, `temp_blks_read`, `temp_blks_written`. To enable it, you will need the following configuration

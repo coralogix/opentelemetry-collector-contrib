@@ -97,6 +97,9 @@ type postgreSQLScraper struct {
 	// are not called again. [DBM P8]
 	explainLimiter     *explainRateLimiter
 	explainNotEligible map[string]struct{}
+	// explainNoPlan holds the statements the explain function refused
+	// (DBM24-DBM26), keyed like the plan cache; they are not called again.
+	explainNoPlan *expirable.LRU[string, struct{}]
 	// if enabled, uses a separated attribute for the schema
 	separateSchemaAttr     bool
 	useOTelSemconv         bool
@@ -181,6 +184,7 @@ func newPostgreSQLScraper(
 		telemetry:          telemetryBuilder,
 		explainLimiter:     newExplainRateLimiter(config.DBM.explainFunctionMaxCallsPerMinute()),
 		explainNotEligible: map[string]struct{}{},
+		explainNoPlan:      newTTLCache[struct{}](explainNoPlanSize, 0),
 		now:                time.Now,
 		queryPlanCache:     queryPlanCache,
 		separateSchemaAttr: separateSchemaAttr,

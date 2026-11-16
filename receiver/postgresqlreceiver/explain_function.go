@@ -34,6 +34,9 @@ const (
 	maxExplainFunctionTimeout               = 2 * time.Second
 	defaultExplainFunctionMaxCallsPerMinute = 30
 	maxExplainFunctionMaxCallsPerMinute     = 600
+	// explainNoPlanSize bounds the statements remembered as refused
+	// (DBM24-DBM26). One evicted from it is tried once more.
+	explainNoPlanSize = 10000
 	// maxSchemaNameBytes is NAMEDATALEN - 1.
 	maxSchemaNameBytes = 63
 )
@@ -162,8 +165,10 @@ func isIdentRune(r rune) bool {
 
 // explainFunctionOutcome classifies a call result by the SQLSTATE the
 // function raises (grants/postgres-plans-definer.sql, W0-07b): DBM10 caller
-// timeout refused, DBM11-DBM15 request refused, every DBM2x database not
-// eligible (no retry), DBM30 planning failed. Anything else is an error.
+// timeout refused, DBM11-DBM16 request refused, DBM20-DBM23 (and any other
+// DBM2x) database not eligible, DBM24-DBM26 plan unavailable for this
+// statement (DBM26: $n before PG 16), DBM30 planning failed. No DBM2x is
+// retried. Anything else (for example 57014) is an error.
 func explainFunctionOutcome(err error) metadata.AttributeExplainOutcome {
 	if err == nil {
 		return metadata.AttributeExplainOutcomeOk
@@ -174,11 +179,14 @@ func explainFunctionOutcome(err error) metadata.AttributeExplainOutcome {
 	}
 	code := string(pqErr.Code)
 	switch {
+	case code == "DBM24", code == "DBM25", code == "DBM26":
+		return metadata.AttributeExplainOutcomeStatementNotEligible
 	case strings.HasPrefix(code, "DBM2"):
+		// DBM20-DBM23, and any other DBM2x: the database.
 		return metadata.AttributeExplainOutcomeNotEligible
 	case code == "DBM10":
 		return metadata.AttributeExplainOutcomeTimeoutRefused
-	case code == "DBM11", code == "DBM12", code == "DBM13", code == "DBM14", code == "DBM15":
+	case code == "DBM11", code == "DBM12", code == "DBM13", code == "DBM14", code == "DBM15", code == "DBM16":
 		return metadata.AttributeExplainOutcomeInputRefused
 	case code == "DBM30":
 		return metadata.AttributeExplainOutcomePlanningFailed
@@ -272,6 +280,10 @@ func (p *postgreSQLScraper) planFromFunction(ctx context.Context, clientFactory 
 		p.recordExplainOutcome(ctx, metadata.AttributeExplainOutcomeSkippedNotEligible)
 		return ""
 	}
+	if p.explainNoPlan.Contains(planCacheKey) {
+		// DBM24-DBM26 earlier: never retried.
+		return ""
+	}
 	// A local check only: the text is never sent. The function accepts
 	// SELECT and WITH only, so other statements are not worth a call.
 	if _, ok := explainFunctionInput(rawQuery); !ok {
@@ -306,6 +318,12 @@ func (p *postgreSQLScraper) planFromFunction(ctx context.Context, clientFactory 
 		}
 		logger.Warn("plans unavailable: database not eligible for the explain function",
 			zap.String("database", database), zap.String("sqlState", sqlState))
+		return ""
+	}
+	if outcome == metadata.AttributeExplainOutcomeStatementNotEligible {
+		p.explainNoPlan.Add(planCacheKey, struct{}{})
+		logger.Debug("plan unavailable for this statement from the explain function",
+			append([]zap.Field{zap.String("queryID", queryID)}, sqlErrorFields(err)...)...)
 		return ""
 	}
 	if err != nil {
