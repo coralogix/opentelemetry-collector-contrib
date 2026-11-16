@@ -1,0 +1,19 @@
+receiver/postgresqlreceiver/p8_mutation_probe_test.go
+  s_f831f252c737d7::t_ac05e92de8131d 1-129
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d8a5576b492062b0a0c27b5277e776dcc7aa9354",
+  "prompts": {},
+  "sessions": {
+    "s_f831f252c737d7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1d17d887-0e27-40f9-aede-50f0536246af",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "oded-dd <oded@coralogix.com>"
+    }
+  }
+}
