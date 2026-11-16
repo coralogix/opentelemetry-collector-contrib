@@ -14,6 +14,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/lib/pq"
+	"github.com/lib/pq/pqerror"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/component/componenttest"
@@ -50,7 +51,7 @@ func p8SetTimeout(ms int64) string {
 func p8PQError(code string) error {
 	return &pq.Error{
 		Severity: "ERROR",
-		Code:     pq.ErrorCode(code),
+		Code:     pqerror.Code(code),
 		Message:  "dbm_explain: " + p7Literal,
 		Detail:   "sqlstate 22P02 " + p7Literal,
 	}
@@ -317,7 +318,7 @@ type p8Harness struct {
 func newP8Harness(t *testing.T, dbm DBMConfig) *p8Harness {
 	t.Helper()
 	tel := componenttest.NewTelemetry()
-	t.Cleanup(func() { require.NoError(t, tel.Shutdown(context.Background())) })
+	t.Cleanup(func() { require.NoError(t, tel.Shutdown(context.Background())) }) //nolint:usetesting // t.Context() is already canceled when Cleanup runs
 	core, observed := observer.New(zapcore.DebugLevel)
 	settings := receivertest.NewNopSettings(metadata.Type)
 	settings.TelemetrySettings = tel.NewTelemetrySettings()
