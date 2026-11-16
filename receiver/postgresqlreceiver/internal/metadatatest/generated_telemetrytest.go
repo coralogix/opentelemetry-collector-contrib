@@ -24,7 +24,7 @@ func NewSettings(tt *componenttest.Telemetry) receiver.Settings {
 func AssertEqualPostgresqlExplainFunctionCalls(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...metricdatatest.Option) {
 	want := metricdata.Metrics{
 		Name:        "otelcol_postgresql.explain_function.calls",
-		Description: "Number of plan requests handled with dbm.explain_function set, by outcome. not_eligible means the function refused the database (SQLSTATE DBM2x); the receiver then stops calling it for that database (skipped_not_eligible) until it restarts. rate_limited requests are retried on a later scrape. The statement text and server messages are never logged. [Development]",
+		Description: "Number of plan requests handled with dbm.explain_function set, by outcome. not_eligible means the function refused the database (SQLSTATE DBM20-DBM23); the receiver then stops calling it for that database (skipped_not_eligible) until it restarts. statement_not_eligible (DBM24-DBM26) is never retried for that statement. rate_limited requests are retried on a later scrape. The statement text and server messages are never logged. [Development]",
 		Unit:        "{request}",
 		Data: metricdata.Sum[int64]{
 			Temporality: metricdata.CumulativeTemporality,

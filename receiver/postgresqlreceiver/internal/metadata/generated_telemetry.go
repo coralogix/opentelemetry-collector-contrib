@@ -61,7 +61,7 @@ func NewTelemetryBuilder(settings component.TelemetrySettings, options ...Teleme
 	var err, errs error
 	builder.PostgresqlExplainFunctionCalls, err = builder.meter.Int64Counter(
 		"otelcol_postgresql.explain_function.calls",
-		metric.WithDescription("Number of plan requests handled with dbm.explain_function set, by outcome. not_eligible means the function refused the database (SQLSTATE DBM2x); the receiver then stops calling it for that database (skipped_not_eligible) until it restarts. rate_limited requests are retried on a later scrape. The statement text and server messages are never logged. [Development]"),
+		metric.WithDescription("Number of plan requests handled with dbm.explain_function set, by outcome. not_eligible means the function refused the database (SQLSTATE DBM20-DBM23); the receiver then stops calling it for that database (skipped_not_eligible) until it restarts. statement_not_eligible (DBM24-DBM26) is never retried for that statement. rate_limited requests are retried on a later scrape. The statement text and server messages are never logged. [Development]"),
 		metric.WithUnit("{request}"),
 	)
 	errs = errors.Join(errs, err)

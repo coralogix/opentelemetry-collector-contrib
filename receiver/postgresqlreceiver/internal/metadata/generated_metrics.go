@@ -177,6 +177,7 @@ const (
 	AttributeExplainOutcomeTimeoutRefused
 	AttributeExplainOutcomePlanningFailed
 	AttributeExplainOutcomeError
+	AttributeExplainOutcomeStatementNotEligible
 )
 
 // String returns the string representation of the AttributeExplainOutcome.
@@ -198,20 +199,23 @@ func (av AttributeExplainOutcome) String() string {
 		return "planning_failed"
 	case AttributeExplainOutcomeError:
 		return "error"
+	case AttributeExplainOutcomeStatementNotEligible:
+		return "statement_not_eligible"
 	}
 	return ""
 }
 
 // MapAttributeExplainOutcome is a helper map of string to AttributeExplainOutcome attribute value.
 var MapAttributeExplainOutcome = map[string]AttributeExplainOutcome{
-	"ok":                   AttributeExplainOutcomeOk,
-	"not_eligible":         AttributeExplainOutcomeNotEligible,
-	"skipped_not_eligible": AttributeExplainOutcomeSkippedNotEligible,
-	"rate_limited":         AttributeExplainOutcomeRateLimited,
-	"input_refused":        AttributeExplainOutcomeInputRefused,
-	"timeout_refused":      AttributeExplainOutcomeTimeoutRefused,
-	"planning_failed":      AttributeExplainOutcomePlanningFailed,
-	"error":                AttributeExplainOutcomeError,
+	"ok":                     AttributeExplainOutcomeOk,
+	"not_eligible":           AttributeExplainOutcomeNotEligible,
+	"skipped_not_eligible":   AttributeExplainOutcomeSkippedNotEligible,
+	"rate_limited":           AttributeExplainOutcomeRateLimited,
+	"input_refused":          AttributeExplainOutcomeInputRefused,
+	"timeout_refused":        AttributeExplainOutcomeTimeoutRefused,
+	"planning_failed":        AttributeExplainOutcomePlanningFailed,
+	"error":                  AttributeExplainOutcomeError,
+	"statement_not_eligible": AttributeExplainOutcomeStatementNotEligible,
 }
 
 // AttributeOperation specifies the value operation attribute.

@@ -169,7 +169,7 @@ func TestExplainViaFunctionRejectsABadQueryID(t *testing.T) {
 	for _, id := range []string{"", "abc", "4242; SELECT", "9223372036854775808"} {
 		client, mock := p8Client(t)
 		_, err := client.explainViaFunction(t.Context(), id, explainFunctionOptions{timeoutMS: 1000}, zap.NewNop())
-		require.Error(t, err, "queryid %q", id)
+		require.ErrorIs(t, err, errExplainFunctionQueryID, "queryid %q", id)
 		require.NoError(t, mock.ExpectationsWereMet())
 	}
 }
@@ -228,17 +228,23 @@ func TestExplainFunctionOutcome(t *testing.T) {
 		want metadata.AttributeExplainOutcome
 	}{
 		{"nil", nil, metadata.AttributeExplainOutcomeOk},
+		// W0-07b grants/postgres-plans-definer.sql (EC-04b hand-off).
 		{"DBM20 temporary objects", p8PQError("DBM20"), metadata.AttributeExplainOutcomeNotEligible},
 		{"DBM21 untrusted role", p8PQError("DBM21"), metadata.AttributeExplainOutcomeNotEligible},
-		{"DBM29 any DBM2x", p8PQError("DBM29"), metadata.AttributeExplainOutcomeNotEligible},
-		{"DBM22 any new DBM2x, e.g. $n on PG 13-15 (W0-07b, code pending)", p8PQError("DBM22"), metadata.AttributeExplainOutcomeNotEligible},
+		{"DBM22 custom dotted setting", p8PQError("DBM22"), metadata.AttributeExplainOutcomeNotEligible},
+		{"DBM23 pg_stat_statements missing", p8PQError("DBM23"), metadata.AttributeExplainOutcomeNotEligible},
+		{"DBM29 unknown DBM2x is database level", p8PQError("DBM29"), metadata.AttributeExplainOutcomeNotEligible},
 		{"wrapped DBM21", fmt.Errorf("explain: %w", p8PQError("DBM21")), metadata.AttributeExplainOutcomeNotEligible},
+		{"DBM24 no application statement", p8PQError("DBM24"), metadata.AttributeExplainOutcomeStatementNotEligible},
+		{"DBM25 several texts", p8PQError("DBM25"), metadata.AttributeExplainOutcomeStatementNotEligible},
+		{"DBM26 $n before PG 16", p8PQError("DBM26"), metadata.AttributeExplainOutcomeStatementNotEligible},
 		{"DBM10 timeout", p8PQError("DBM10"), metadata.AttributeExplainOutcomeTimeoutRefused},
-		{"DBM11 empty or long", p8PQError("DBM11"), metadata.AttributeExplainOutcomeInputRefused},
+		{"DBM11 null or size", p8PQError("DBM11"), metadata.AttributeExplainOutcomeInputRefused},
 		{"DBM12 separator", p8PQError("DBM12"), metadata.AttributeExplainOutcomeInputRefused},
 		{"DBM13 literal", p8PQError("DBM13"), metadata.AttributeExplainOutcomeInputRefused},
 		{"DBM14 not SELECT", p8PQError("DBM14"), metadata.AttributeExplainOutcomeInputRefused},
-		{"DBM15 schema not allowed (W0-07b)", p8PQError("DBM15"), metadata.AttributeExplainOutcomeInputRefused},
+		{"DBM15 schema not allowed", p8PQError("DBM15"), metadata.AttributeExplainOutcomeInputRefused},
+		{"DBM16 forbidden function", p8PQError("DBM16"), metadata.AttributeExplainOutcomeInputRefused},
 		{"DBM30 planning", p8PQError("DBM30"), metadata.AttributeExplainOutcomePlanningFailed},
 		{"42883 function missing", p8PQError("42883"), metadata.AttributeExplainOutcomeError},
 		{"42501 no privilege", p8PQError("42501"), metadata.AttributeExplainOutcomeError},
@@ -440,6 +446,36 @@ func TestTopQueryExplainFunctionNotEligibleStopsCalls(t *testing.T) {
 	require.Len(t, entries, 1, "reported once per database")
 	assert.Equal(t, zapcore.WarnLevel, entries[0].Level)
 	assert.Equal(t, map[string]any{"database": "postgres", "sqlState": "DBM21"}, entries[0].ContextMap())
+	assertNoStatementText(t, h.observed)
+	h.assertNoOwnExplain(t)
+}
+
+// TestTopQueryExplainFunctionStatementNotEligible: DBM24-DBM26 refuse one
+// statement, never retried; other statements of the database are still
+// explained.
+func TestTopQueryExplainFunctionStatementNotEligible(t *testing.T) {
+	h := newP8Harness(t, DBMConfig{ExplainFunction: explainFunctionName})
+	primeTopQueryCache(h.scraper, "postgres", "10", "4242")
+	h.mock.ExpectQuery("LIMIT 10").WillReturnRows(sqlmock.NewRows(topQueryColumns).AddRow(p8TopQueryRow("4242", p8Statement, "10")...))
+	h.expectCall(1000, 4242).WillReturnError(p8PQError("DBM26"))
+	_, err := h.scraper.scrapeTopQuery(t.Context(), 10, 10, 10, 0)
+	require.NoError(t, err)
+	require.NoError(t, h.mock.ExpectationsWereMet())
+
+	// The plan cache forgets the statement (TTL); the refusal is still kept.
+	h.scraper.queryPlanCache.Purge()
+	primeTopQueryCache(h.scraper, "postgres", "10", "4343")
+	h.mock.ExpectQuery("LIMIT 10").WillReturnRows(sqlmock.NewRows(topQueryColumns).
+		AddRow(p8TopQueryRow("4242", p8Statement, "20")...).
+		AddRow(p8TopQueryRow("4343", p8Statement2, "10")...))
+	h.expectCall(1000, 4343).WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(p8Plan))
+	logs, err := h.scraper.scrapeTopQuery(t.Context(), 10, 10, 10, 0)
+	require.NoError(t, err)
+	require.NoError(t, h.mock.ExpectationsWereMet(), "4242 is not called again; 4343 is")
+	assert.Equal(t, map[string]string{"4343": p8ObfuscatedPlan(t)}, queryPlans(logs))
+
+	h.assertCalls(t, map[string]int64{"statement_not_eligible": 1, "ok": 1})
+	assert.Empty(t, h.observed.FilterMessage("plans unavailable: database not eligible for the explain function").AllUntimed())
 	assertNoStatementText(t, h.observed)
 	h.assertNoOwnExplain(t)
 }
