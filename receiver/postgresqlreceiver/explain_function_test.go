@@ -166,7 +166,7 @@ func TestExplainViaFunctionPassesTheQueryID(t *testing.T) {
 // TestExplainViaFunctionRejectsABadQueryID: nothing is sent for a queryid
 // that is not a bigint.
 func TestExplainViaFunctionRejectsABadQueryID(t *testing.T) {
-	for _, id := range []string{"", "abc", "4242; SELECT", "9223372036854775808"} {
+	for _, id := range []string{"", "abc", "4242; SELECT", "9223372036854775808", "+42", "0042", "-0", " 42", "42 ", "0x2a"} {
 		client, mock := p8Client(t)
 		_, err := client.explainViaFunction(t.Context(), id, explainFunctionOptions{timeoutMS: 1000}, zap.NewNop())
 		require.ErrorIs(t, err, errExplainFunctionQueryID, "queryid %q", id)
@@ -237,17 +237,19 @@ func TestExplainFunctionOutcome(t *testing.T) {
 		{"wrapped DBM21", fmt.Errorf("explain: %w", p8PQError("DBM21")), metadata.AttributeExplainOutcomeNotEligible},
 		{"DBM24 no application statement", p8PQError("DBM24"), metadata.AttributeExplainOutcomeStatementNotEligible},
 		{"DBM25 several texts", p8PQError("DBM25"), metadata.AttributeExplainOutcomeStatementNotEligible},
-		{"DBM26 $n before PG 16", p8PQError("DBM26"), metadata.AttributeExplainOutcomeStatementNotEligible},
+		{"DBM26 retired by W0-07b I-1, kept for compatibility", p8PQError("DBM26"), metadata.AttributeExplainOutcomeStatementNotEligible},
+		// Review of #50: the function missing or not callable is database-level.
+		{"42883 function missing", p8PQError("42883"), metadata.AttributeExplainOutcomeFunctionUnavailable},
+		{"3F000 schema missing", p8PQError("3F000"), metadata.AttributeExplainOutcomeFunctionUnavailable},
+		{"42501 no EXECUTE", p8PQError("42501"), metadata.AttributeExplainOutcomeFunctionUnavailable},
 		{"DBM10 timeout", p8PQError("DBM10"), metadata.AttributeExplainOutcomeTimeoutRefused},
 		{"DBM11 null or size", p8PQError("DBM11"), metadata.AttributeExplainOutcomeInputRefused},
 		{"DBM12 separator", p8PQError("DBM12"), metadata.AttributeExplainOutcomeInputRefused},
 		{"DBM13 literal", p8PQError("DBM13"), metadata.AttributeExplainOutcomeInputRefused},
 		{"DBM14 not SELECT", p8PQError("DBM14"), metadata.AttributeExplainOutcomeInputRefused},
-		{"DBM15 schema not allowed", p8PQError("DBM15"), metadata.AttributeExplainOutcomeInputRefused},
+		{"DBM15 schema not allowed is a per-database configuration mismatch", p8PQError("DBM15"), metadata.AttributeExplainOutcomeNotEligible},
 		{"DBM16 forbidden function", p8PQError("DBM16"), metadata.AttributeExplainOutcomeInputRefused},
 		{"DBM30 planning", p8PQError("DBM30"), metadata.AttributeExplainOutcomePlanningFailed},
-		{"42883 function missing", p8PQError("42883"), metadata.AttributeExplainOutcomeError},
-		{"42501 no privilege", p8PQError("42501"), metadata.AttributeExplainOutcomeError},
 		{"57014 canceled by statement_timeout", p8PQError("57014"), metadata.AttributeExplainOutcomeError},
 		{"DB021 not DBM2x", p8PQError("DB021"), metadata.AttributeExplainOutcomeError},
 		{"not a database error", errors.New("boom"), metadata.AttributeExplainOutcomeError},
@@ -260,17 +262,32 @@ func TestExplainFunctionOutcome(t *testing.T) {
 func TestExplainRateLimiter(t *testing.T) {
 	t0 := time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC)
 	l := newExplainRateLimiter(2)
-	assert.True(t, l.allow(t0), "starts full")
-	assert.True(t, l.allow(t0))
-	assert.False(t, l.allow(t0), "burst is the per-minute cap")
+	assert.True(t, l.allow(t0), "starts with one call")
+	assert.False(t, l.allow(t0), "no burst: calls are evenly spaced")
 	assert.False(t, l.allow(t0.Add(29*time.Second)))
-	assert.True(t, l.allow(t0.Add(30*time.Second)), "one call per 30s refills at 2 per minute")
+	assert.True(t, l.allow(t0.Add(30*time.Second)), "one call per 30s at 2 per minute")
 	assert.False(t, l.allow(t0.Add(30*time.Second)))
 	later := t0.Add(10 * time.Minute)
 	assert.True(t, l.allow(later))
-	assert.True(t, l.allow(later))
-	assert.False(t, l.allow(later), "never more than the cap after idle time")
+	assert.False(t, l.allow(later), "idle time does not build a burst")
 	assert.False(t, l.allow(t0), "a clock step back adds nothing")
+}
+
+// TestExplainRateLimiterIsTrueN: with an attempt every millisecond, exactly N
+// calls are allowed in the first minute (review of #50: it allowed about 2N).
+func TestExplainRateLimiterIsTrueN(t *testing.T) {
+	for _, n := range []int{1, 7, 30, 600} {
+		l := newExplainRateLimiter(n)
+		now := time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC)
+		got := 0
+		for range 60 * 1000 {
+			if l.allow(now) {
+				got++
+			}
+			now = now.Add(time.Millisecond)
+		}
+		assert.Equal(t, n, got, "n=%d", n)
+	}
 }
 
 func TestExplainFunctionConfigValidate(t *testing.T) {
@@ -299,6 +316,13 @@ func TestExplainFunctionConfigValidate(t *testing.T) {
 		{name: "schemas without function", dbm: DBMConfig{ExplainFunctionSchemas: []string{"app"}}, wantErr: "requires 'dbm.explain_function'"},
 		{name: "timeout without function", dbm: DBMConfig{ExplainFunctionTimeout: time.Second}, wantErr: "requires 'dbm.explain_function'"},
 		{name: "calls without function", dbm: DBMConfig{ExplainFunctionMaxCallsPerMinute: 10}, wantErr: "requires 'dbm.explain_function'"},
+		{name: "16 schemas", dbm: DBMConfig{ExplainFunction: explainFunctionName, ExplainFunctionSchemas: p8Schemas(16)}},
+		{name: "17 schemas", dbm: DBMConfig{ExplainFunction: explainFunctionName, ExplainFunctionSchemas: p8Schemas(17)}, wantErr: "'dbm.explain_function_schemas' must have at most 16 entries"},
+		{name: "calls message", dbm: DBMConfig{ExplainFunction: explainFunctionName, ExplainFunctionMaxCallsPerMinute: 601}, wantErr: "must be from 1 to 600, or 0 for the default (30), got 601"},
+		{name: "recheck 5m", dbm: DBMConfig{ExplainFunction: explainFunctionName, ExplainFunctionRecheckInterval: 5 * time.Minute}},
+		{name: "recheck below 5m", dbm: DBMConfig{ExplainFunction: explainFunctionName, ExplainFunctionRecheckInterval: 4 * time.Minute}, wantErr: "'dbm.explain_function_recheck_interval'"},
+		{name: "negative recheck", dbm: DBMConfig{ExplainFunction: explainFunctionName, ExplainFunctionRecheckInterval: -time.Hour}, wantErr: "'dbm.explain_function_recheck_interval'"},
+		{name: "recheck without function", dbm: DBMConfig{ExplainFunctionRecheckInterval: time.Hour}, wantErr: "requires 'dbm.explain_function'"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := createDefaultConfig().(*Config)
@@ -321,6 +345,17 @@ func TestExplainFunctionOptionsDefaults(t *testing.T) {
 		DBMConfig{ExplainFunction: explainFunctionName, ExplainFunctionTimeout: 250 * time.Millisecond, ExplainFunctionSchemas: []string{"app"}}.explainFunctionOptions())
 	assert.Equal(t, 30, DBMConfig{ExplainFunction: explainFunctionName}.explainFunctionMaxCallsPerMinute())
 	assert.Equal(t, 5, DBMConfig{ExplainFunction: explainFunctionName, ExplainFunctionMaxCallsPerMinute: 5}.explainFunctionMaxCallsPerMinute())
+	assert.Equal(t, explainFunctionOptions{timeoutMS: 1000}, DBMConfig{ExplainFunction: explainFunctionName, ExplainFunctionSchemas: []string{}}.explainFunctionOptions(), "an empty list sends NULL")
+	assert.Equal(t, time.Hour, DBMConfig{ExplainFunction: explainFunctionName}.explainFunctionRecheckInterval())
+	assert.Equal(t, 10*time.Minute, DBMConfig{ExplainFunction: explainFunctionName, ExplainFunctionRecheckInterval: 10 * time.Minute}.explainFunctionRecheckInterval())
+}
+
+func p8Schemas(n int) []string {
+	out := make([]string, n)
+	for i := range out {
+		out[i] = fmt.Sprintf("s%d", i)
+	}
+	return out
 }
 
 // p8TopQueryRow is a pg_stat_statements row for database postgres, userid
@@ -445,19 +480,19 @@ func TestTopQueryExplainFunctionNotEligibleStopsCalls(t *testing.T) {
 	entries := h.observed.FilterMessage("plans unavailable: database not eligible for the explain function").AllUntimed()
 	require.Len(t, entries, 1, "reported once per database")
 	assert.Equal(t, zapcore.WarnLevel, entries[0].Level)
-	assert.Equal(t, map[string]any{"database": "postgres", "sqlState": "DBM21"}, entries[0].ContextMap())
+	assert.Equal(t, map[string]any{"database": "postgres", "sqlState": "DBM21", "hint": "see coralogix_dbm.explain_preflight_report()"}, entries[0].ContextMap())
 	assertNoStatementText(t, h.observed)
 	h.assertNoOwnExplain(t)
 }
 
-// TestTopQueryExplainFunctionStatementNotEligible: DBM24-DBM26 refuse one
+// TestTopQueryExplainFunctionStatementNotEligible: DBM24/DBM25 refuse one
 // statement, never retried; other statements of the database are still
 // explained.
 func TestTopQueryExplainFunctionStatementNotEligible(t *testing.T) {
 	h := newP8Harness(t, DBMConfig{ExplainFunction: explainFunctionName})
 	primeTopQueryCache(h.scraper, "postgres", "10", "4242")
 	h.mock.ExpectQuery("LIMIT 10").WillReturnRows(sqlmock.NewRows(topQueryColumns).AddRow(p8TopQueryRow("4242", p8Statement, "10")...))
-	h.expectCall(1000, 4242).WillReturnError(p8PQError("DBM26"))
+	h.expectCall(1000, 4242).WillReturnError(p8PQError("DBM24"))
 	_, err := h.scraper.scrapeTopQuery(t.Context(), 10, 10, 10, 0)
 	require.NoError(t, err)
 	require.NoError(t, h.mock.ExpectationsWereMet())
@@ -528,7 +563,7 @@ func TestTopQueryExplainFunctionFailureLogsSQLStateOnly(t *testing.T) {
 	require.Len(t, entries, 1)
 	assert.Equal(t, map[string]any{
 		"queryID": "4242", "queryLength": int64(len(p7Explainable)),
-		"sqlState": "DBM30", "errorCategory": "", "explainOutcome": "planning_failed",
+		"sqlState": "DBM30", "errorCategory": "dbm", "explainOutcome": "planning_failed",
 	}, entries[0].ContextMap())
 	h.assertCalls(t, map[string]int64{"planning_failed": 1})
 	h.assertNoOwnExplain(t)
@@ -544,7 +579,111 @@ func TestTopQueryExplainFunctionSkipsNonSelect(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, h.mock.ExpectationsWereMet())
 	assert.Empty(t, queryPlans(logs))
-	_, err = h.tel.GetMetric(p8MetricName)
-	require.Error(t, err, "the function is not called for a statement it would refuse")
+	h.assertCalls(t, map[string]int64{"skipped_local": 1})
 	h.assertNoOwnExplain(t)
+}
+
+// p8TopQueryRowDB is p8TopQueryRow for another database.
+func p8TopQueryRowDB(database, queryid, query, value string) []driver.Value {
+	row := p8TopQueryRow(queryid, query, value)
+	for i, column := range topQueryColumns {
+		if column == "datname" {
+			row[i] = database
+		}
+	}
+	return row
+}
+
+// TestTopQueryExplainFunctionMissingIsDatabaseLevel (review of #50, finding
+// 1): a database without the function gets one call, one Warn with a hint,
+// and no error flood; the other statements are skipped without a call.
+func TestTopQueryExplainFunctionMissingIsDatabaseLevel(t *testing.T) {
+	h := newP8Harness(t, DBMConfig{ExplainFunction: explainFunctionName})
+	rows := sqlmock.NewRows(topQueryColumns)
+	for i, id := range []string{"1", "2", "3"} {
+		primeTopQueryCache(h.scraper, "postgres", "10", id)
+		rows.AddRow(p8TopQueryRow(id, p8Statement, fmt.Sprint(30-i))...)
+	}
+	h.mock.ExpectQuery("LIMIT 10").WillReturnRows(rows)
+	h.expectCall(1000, 1).WillReturnError(p8PQError("42883"))
+
+	_, err := h.scraper.scrapeTopQuery(t.Context(), 10, 10, 10, 0)
+	require.NoError(t, err)
+	require.NoError(t, h.mock.ExpectationsWereMet(), "only the first statement is called")
+	h.assertCalls(t, map[string]int64{"function_unavailable": 1, "skipped_not_eligible": 2})
+	assert.Empty(t, h.observed.FilterMessage("failed to get a plan from the explain function").AllUntimed())
+	entries := h.observed.FilterMessage("plans unavailable: database not eligible for the explain function").AllUntimed()
+	require.Len(t, entries, 1)
+	assert.Equal(t, map[string]any{"database": "postgres", "sqlState": "42883", "hint": "function not installed in this database"}, entries[0].ContextMap())
+}
+
+// TestTopQueryExplainFunctionRecheck (review of #50, finding 6): after the
+// re-check interval one probe call is allowed per database; a refusal keeps
+// it unavailable without a new Warn, a success makes it available with one
+// Warn per transition.
+func TestTopQueryExplainFunctionRecheck(t *testing.T) {
+	h := newP8Harness(t, DBMConfig{ExplainFunction: explainFunctionName, ExplainFunctionRecheckInterval: 10 * time.Minute})
+	now := time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC)
+	h.scraper.now = func() time.Time { return now }
+	scrape := func(value string) plog.Logs {
+		t.Helper()
+		primeTopQueryCache(h.scraper, "postgres", "10", "4242")
+		h.scraper.queryPlanCache.Purge()
+		h.mock.ExpectQuery("LIMIT 10").WillReturnRows(sqlmock.NewRows(topQueryColumns).AddRow(p8TopQueryRow("4242", p8Statement, value)...))
+		logs, err := h.scraper.scrapeTopQuery(t.Context(), 10, 10, 10, 0)
+		require.NoError(t, err)
+		require.NoError(t, h.mock.ExpectationsWereMet())
+		return logs
+	}
+	h.expectCall(1000, 4242).WillReturnError(p8PQError("DBM22"))
+	scrape("10")
+	now = now.Add(9 * time.Minute)
+	scrape("10") // no call before the interval
+	now = now.Add(2 * time.Minute)
+	h.expectCall(1000, 4242).WillReturnError(p8PQError("DBM21"))
+	scrape("10") // probe, refused again
+	now = now.Add(11 * time.Minute)
+	h.expectCall(1000, 4242).WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(p8Plan))
+	logs := scrape("10") // probe, accepted
+	assert.Equal(t, map[string]string{"4242": p8ObfuscatedPlan(t)}, queryPlans(logs))
+
+	h.assertCalls(t, map[string]int64{"not_eligible": 2, "skipped_not_eligible": 1, "ok": 1})
+	down := h.observed.FilterMessage("plans unavailable: database not eligible for the explain function").AllUntimed()
+	require.Len(t, down, 1, "one Warn per transition")
+	assert.Equal(t, map[string]any{"database": "postgres", "sqlState": "DBM22", "hint": "use a clean connection"}, down[0].ContextMap())
+	up := h.observed.FilterMessage("plans available again from the explain function").AllUntimed()
+	require.Len(t, up, 1)
+	assert.Equal(t, zapcore.WarnLevel, up[0].Level)
+	assert.Equal(t, map[string]any{"database": "postgres"}, up[0].ContextMap())
+}
+
+// TestTopQueryExplainFunctionBudgetCountsCallsOnly (review of #50, finding
+// 3): statements skipped without a call (database not eligible, local
+// skip) do not use the per-scrape explain budget.
+func TestTopQueryExplainFunctionBudgetCountsCallsOnly(t *testing.T) {
+	h := newP8Harness(t, DBMConfig{ExplainFunction: explainFunctionName})
+	primeTopQueryCache(h.scraper, "bad", "10", "1")
+	h.mock.ExpectQuery("LIMIT 10").WillReturnRows(sqlmock.NewRows(topQueryColumns).
+		AddRow(p8TopQueryRowDB("bad", "1", p8Statement, "30")...))
+	h.expectCall(1000, 1).WillReturnError(p8PQError("DBM21"))
+	_, err := h.scraper.scrapeTopQuery(t.Context(), 10, 10, 10, 0)
+	require.NoError(t, err)
+	require.NoError(t, h.mock.ExpectationsWereMet())
+
+	// Budget of 1 call: "bad" is skipped (not eligible), statement 2 is
+	// skipped locally, statement 3 still gets the call.
+	primeTopQueryCache(h.scraper, "bad", "10", "1")
+	primeTopQueryCache(h.scraper, "postgres", "10", "2")
+	primeTopQueryCache(h.scraper, "postgres", "10", "3")
+	h.scraper.queryPlanCache.Purge()
+	h.mock.ExpectQuery("LIMIT 10").WillReturnRows(sqlmock.NewRows(topQueryColumns).
+		AddRow(p8TopQueryRowDB("bad", "1", p8Statement, "60")...).
+		AddRow(p8TopQueryRow("2", "UPDATE accounts SET a = $1", "40")...).
+		AddRow(p8TopQueryRow("3", p8Statement2, "20")...))
+	h.scraper.now = func() time.Time { return time.Now().Add(time.Minute) }
+	h.expectCall(1000, 3).WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(p8Plan))
+	logs, err := h.scraper.scrapeTopQuery(t.Context(), 10, 10, 1, 0)
+	require.NoError(t, err)
+	require.NoError(t, h.mock.ExpectationsWereMet())
+	assert.Equal(t, map[string]string{"3": p8ObfuscatedPlan(t)}, queryPlans(logs))
 }

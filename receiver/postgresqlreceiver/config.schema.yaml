@@ -27,10 +27,14 @@ $defs:
         description: 'ExplainFunction, when set, makes the receiver get each estimated plan by calling this function (DBM fork patch P8) instead of running its own PREPARE and EXPLAIN. The only accepted value is coralogix_dbm.explain_statement (grants/postgres-plans-definer.sql). There is no fallback: when the call fails, that statement gets no plan.'
         type: string
       explain_function_max_calls_per_minute:
-        description: ExplainFunctionMaxCallsPerMinute caps the calls to the function, 1 to 600 per minute. 0 means 30.
+        description: ExplainFunctionMaxCallsPerMinute caps the calls to the function, evenly spaced, 1 to 600 per minute. 0 means 30.
         type: integer
+      explain_function_recheck_interval:
+        description: ExplainFunctionRecheckInterval is how long a database gets no calls after the function refused it or was not callable, before one probe call is allowed. At least 5m. 0 means 1h.
+        type: string
+        format: duration
       explain_function_schemas:
-        description: ExplainFunctionSchemas, when set, is passed to the function as its optional schemas argument, so that unqualified table names resolve in these schemas. The function accepts only schemas its installer listed.
+        description: ExplainFunctionSchemas, when set, is passed to the function as its schemas argument (at most 16 names), so that unqualified table names resolve in these schemas. Every name must be in the install's dbm_plan_schemas list, else the function refuses the database (DBM15). An empty list is the same as none.
         type: array
         items:
           type: string

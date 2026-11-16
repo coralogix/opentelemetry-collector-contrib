@@ -108,12 +108,18 @@ type DBMConfig struct {
 	// 1ms to 2s (the function refuses any other value). 0 means 1s.
 	ExplainFunctionTimeout time.Duration `mapstructure:"explain_function_timeout"`
 	// ExplainFunctionSchemas, when set, is passed to the function as its
-	// optional schemas argument, so that unqualified table names resolve in
-	// these schemas. The function accepts only schemas its installer listed.
+	// schemas argument (at most 16 names), so that unqualified table names
+	// resolve in these schemas. Every name must be in the install's
+	// dbm_plan_schemas list, else the function refuses the database (DBM15).
+	// An empty list is the same as none.
 	ExplainFunctionSchemas []string `mapstructure:"explain_function_schemas"`
-	// ExplainFunctionMaxCallsPerMinute caps the calls to the function, 1 to
-	// 600 per minute. 0 means 30.
+	// ExplainFunctionMaxCallsPerMinute caps the calls to the function, evenly
+	// spaced, 1 to 600 per minute. 0 means 30.
 	ExplainFunctionMaxCallsPerMinute int `mapstructure:"explain_function_max_calls_per_minute"`
+	// ExplainFunctionRecheckInterval is how long a database gets no calls
+	// after the function refused it or was not callable, before one probe
+	// call is allowed. At least 5m. 0 means 1h.
+	ExplainFunctionRecheckInterval time.Duration `mapstructure:"explain_function_recheck_interval"`
 	// prevent unkeyed literal initialization
 	_ struct{}
 }

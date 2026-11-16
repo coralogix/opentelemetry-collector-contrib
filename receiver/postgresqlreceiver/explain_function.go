@@ -341,3 +341,6 @@ func (p *postgreSQLScraper) planFromFunction(ctx context.Context, clientFactory 
 func (p *postgreSQLScraper) recordExplainOutcome(ctx context.Context, outcome metadata.AttributeExplainOutcome) {
 	p.telemetry.PostgresqlExplainFunctionCalls.Add(ctx, 1, metric.WithAttributes(attribute.String("explain_outcome", outcome.String())))
 }
+
+// explainFunctionRecheckInterval returns the re-check interval. RED STUB.
+func (DBMConfig) explainFunctionRecheckInterval() time.Duration { return 0 }
