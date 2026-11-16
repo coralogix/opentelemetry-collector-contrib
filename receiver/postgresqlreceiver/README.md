@@ -198,6 +198,39 @@ Database Monitoring, where the edge processor (`dbmprocessor`) runs the credenti
 then **deletes `db.query.text.raw` from every record unless a Full capture lease applies**. Enable it
 only in a pipeline that runs that processor before any exporter. Without it, keep the option off.
 
+#### Plans from an explain function (`dbm.explain_function`)
+
+- `dbm.explain_function`: (optional) The only accepted value is `coralogix_dbm.explain_statement`, a
+  hardened `SECURITY DEFINER` function that the database administrator installs
+  (`grants/postgres-plans-definer.sql`). When set, the receiver gets each estimated plan by calling it,
+  and never runs its own `PREPARE` / `EXPLAIN`. There is no fallback: when the call fails, that
+  statement gets no plan.
+- `dbm.explain_function_timeout`: (optional, default=`1s`) The `statement_timeout` of each call,
+  from `1ms` to `2s` in whole milliseconds. The function refuses to run without it.
+- `dbm.explain_function_schemas`: (optional) Passed as the function's `schemas` argument, so that
+  unqualified table names resolve in these schemas. The function accepts only schemas its installer listed.
+- `dbm.explain_function_max_calls_per_minute`: (optional, default=`30`, maximum `600`) A token-bucket
+  limit on calls. A statement that is rate limited is tried again on a later scrape.
+
+```yaml
+receivers:
+  postgresql:
+    dbm:
+      explain_function: coralogix_dbm.explain_statement
+      explain_function_timeout: 1s
+      explain_function_schemas: [app]
+```
+
+Each call runs in its own read-only transaction: `SET LOCAL statement_timeout`, then
+`SELECT coralogix_dbm.explain_statement($1[, $2])`, then a rollback. Leading comments are removed
+from the statement first, and only `SELECT` and `WITH` statements are sent. Errors are logged by
+SQLSTATE only, never by message or statement text. When the function refuses the database itself
+(SQLSTATE `DBM2x`, for example an untrusted role that can create objects), the receiver logs one
+warning, `plans unavailable: database not eligible for the explain function`, and stops calling the
+function for that database until it restarts. The counter `otelcol_postgresql.explain_function.calls`
+(attribute `explain_outcome`) reports every outcome, including `not_eligible`,
+`skipped_not_eligible` and `rate_limited`.
+
 ### Top Query Collection
 We provide functionality to collect the most executed queries from PostgreSQL. It will get data from `pg_stat_statements` and report incremental value of `total_exec_time`, `total_plan_time`, `calls`, `rows`, `shared_blks_dirtied`, `shared_blks_hit`, `shared_blks_read`, `shared_blks_written`, `temp_blks_read`, `temp_blks_written`. To enable it, you will need the following configuration
 ```

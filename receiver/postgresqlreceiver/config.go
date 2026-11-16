@@ -210,6 +210,10 @@ func (cfg *Config) Validate() error {
 			TopQueryCandidateOrderCalls, TopQueryCandidateOrderTotalTime, cfg.TopQueryCollection.CandidateOrder))
 	}
 
+	if explainErr := cfg.DBM.validateExplainFunction(); explainErr != nil {
+		err = multierr.Append(err, explainErr)
+	}
+
 	if cfg.LogsBuilderConfig.Events.DbServerQueryPlan.Enabled && !cfg.LogsBuilderConfig.Events.DbServerTopQuery.Enabled {
 		err = multierr.Append(err, errQueryPlanWithoutTopQuery)
 	}
