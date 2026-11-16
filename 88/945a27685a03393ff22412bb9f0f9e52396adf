@@ -1,0 +1,19 @@
+receiver/postgresqlreceiver/explain_function_test.go
+  s_f831f252c737d7::t_c466471c1d6828 748-751,753-763,803-813
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "88945a27685a03393ff22412bb9f0f9e52396adf",
+  "prompts": {},
+  "sessions": {
+    "s_f831f252c737d7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1d17d887-0e27-40f9-aede-50f0536246af",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "oded-dd <oded@coralogix.com>"
+    }
+  }
+}
