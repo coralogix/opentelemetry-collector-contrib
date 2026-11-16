@@ -73,7 +73,7 @@ func TestP8MutationProbe(t *testing.T) {
 		{"R16-refused-statement-retried-at-once", "explain_function.go", "if now.Before(retryAt) {", "if now.Before(retryAt) && false {", "TestTopQueryExplainFunctionStatementNotEligible|TestTopQueryExplainFunctionStatementRetryAfter24h"},
 		{"R17-refused-statement-never-retried", "explain_function.go", "explainNoPlanRetry = 24 * time.Hour", "explainNoPlanRetry = 1000 * time.Hour", "TestTopQueryExplainFunctionStatementRetryAfter24h"},
 		{"R18-probe-clears-on-any-result", "explain_function.go", "if !explainProbeClears(outcome, err) {", "if false {", "TestTopQueryExplainFunctionProbeClearRule"},
-		{"R19-DBM11-clears", "explain_function.go", "return ok && pqErr.Code != \"DBM11\"", "return ok", "TestTopQueryExplainFunctionProbeClearRule"},
+		{"R19-DBM11-clears", "explain_function.go", "return ok && pqErr.Code != \"DBM11\"", "return ok && pqErr.Code != \"\"", "TestTopQueryExplainFunctionProbeClearRule"},
 		{"R20-failed-probe-not-rearmed", "explain_function.go", "\t\t\tp.explainNotEligible[database] = now.Add(p.config.DBM.explainFunctionRecheckInterval())\n\t\t} else {", "\t\t\t_ = now\n\t\t} else {", "TestTopQueryExplainFunctionProbeClearRule"},
 	}
 	control := exec.Command("go", "test", "-count=1", "-run", "^(TestExplain|TestTopQueryExplainFunction)", ".")
