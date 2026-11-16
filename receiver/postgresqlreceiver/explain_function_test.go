@@ -209,6 +209,7 @@ func TestExplainFunctionOutcome(t *testing.T) {
 		{"DBM12 separator", p8PQError("DBM12"), metadata.AttributeExplainOutcomeInputRefused},
 		{"DBM13 literal", p8PQError("DBM13"), metadata.AttributeExplainOutcomeInputRefused},
 		{"DBM14 not SELECT", p8PQError("DBM14"), metadata.AttributeExplainOutcomeInputRefused},
+		{"DBM15 schema not allowed (W0-07b)", p8PQError("DBM15"), metadata.AttributeExplainOutcomeInputRefused},
 		{"DBM30 planning", p8PQError("DBM30"), metadata.AttributeExplainOutcomePlanningFailed},
 		{"42883 function missing", p8PQError("42883"), metadata.AttributeExplainOutcomeError},
 		{"42501 no privilege", p8PQError("42501"), metadata.AttributeExplainOutcomeError},
