@@ -207,10 +207,15 @@ only in a pipeline that runs that processor before any exporter. Without it, kee
   statement gets no plan.
 - `dbm.explain_function_timeout`: (optional, default=`1s`) The `statement_timeout` of each call,
   from `1ms` to `2s` in whole milliseconds. The function refuses to run without it.
-- `dbm.explain_function_schemas`: (optional) Passed as the function's `schemas` argument, so that
-  unqualified table names resolve in these schemas. The function accepts only schemas its installer listed.
-- `dbm.explain_function_max_calls_per_minute`: (optional, default=`30`, maximum `600`) A token-bucket
-  limit on calls. A statement that is rate limited is tried again on a later scrape.
+- `dbm.explain_function_schemas`: (optional, at most 16 names) Passed as the function's `schemas`
+  argument, so that unqualified table names resolve in these schemas. Every name must be in the
+  install's `dbm_plan_schemas` list; otherwise the function refuses the database (`DBM15`). An empty
+  list is the same as none.
+- `dbm.explain_function_max_calls_per_minute`: (optional, default=`30`, maximum `600`) At most this
+  many calls per minute, evenly spaced (no burst). A statement that is rate limited is tried again on a
+  later scrape.
+- `dbm.explain_function_recheck_interval`: (optional, default=`1h`, minimum `5m`) How long a database
+  gets no calls after the function refused it, before one probe call is allowed.
 
 ```yaml
 receivers:
@@ -224,16 +229,24 @@ receivers:
 Each call runs in its own read-only transaction: `SET LOCAL statement_timeout`, then
 `SELECT coralogix_dbm.explain_statement($1::bigint, $2::name[])` with the `pg_stat_statements`
 `queryid` and the configured schemas, then a rollback. The receiver never sends statement text: the
-function reads the statement from `pg_stat_statements` itself. Only `SELECT` and `WITH` statements
-are requested. Errors are logged by
-SQLSTATE only, never by message or statement text. When the function refuses the database itself
-(SQLSTATE `DBM20` to `DBM23`, for example an untrusted role that can create objects), the receiver logs
-one warning, `plans unavailable: database not eligible for the explain function`, and stops calling
-the function for that database until it restarts. When it refuses one statement (`DBM24` to `DBM26`;
-`DBM26` is a statement with `$n` parameters before PostgreSQL 16), that statement is not requested
-again. The counter `otelcol_postgresql.explain_function.calls`
-(attribute `explain_outcome`) reports every outcome, including `not_eligible`,
-`skipped_not_eligible`, `statement_not_eligible` and `rate_limited`.
+function reads the statement from `pg_stat_statements` itself and strips its comments; the receiver
+strips nothing. Statements whose first word is plainly not `SELECT` or `WITH` are not requested
+(`skipped_local`); a statement that starts with a comment is left to the function. Because the call needs a transaction, PgBouncer in
+statement pooling mode is not supported. Errors are logged by SQLSTATE only, never by message or
+statement text.
+
+When the function refuses the database itself (SQLSTATE `DBM20` to `DBM23` or `DBM15`), or cannot be
+called (`42883` function missing, `3F000` schema missing, `42501` no EXECUTE), the receiver logs one
+warning, `plans unavailable: database not eligible for the explain function`, with the SQLSTATE and a
+hint (for example `use a clean connection` for `DBM20` and `DBM22`, or `see
+coralogix_dbm.explain_preflight_report()` for `DBM21`). It then makes no call to that database until
+`dbm.explain_function_recheck_interval` has passed, then one probe call. When the probe succeeds, it
+logs `plans available again from the explain function`. When the function refuses one statement
+(`DBM24` no application statement with that queryid, `DBM25` several texts), that statement is not
+requested again for 24 hours (at most 10,000 statements are remembered). This one retry per statement
+per 24 hours is a deliberate, bounded exception to "never retry a `DBM2x` code". The counter `otelcol_postgresql.explain_function.calls` (attribute `explain_outcome`)
+reports every outcome, including `not_eligible`, `function_unavailable`, `skipped_not_eligible`,
+`statement_not_eligible`, `skipped_local` and `rate_limited`.
 
 ### Top Query Collection
 We provide functionality to collect the most executed queries from PostgreSQL. It will get data from `pg_stat_statements` and report incremental value of `total_exec_time`, `total_plan_time`, `calls`, `rows`, `shared_blks_dirtied`, `shared_blks_hit`, `shared_blks_read`, `shared_blks_written`, `temp_blks_read`, `temp_blks_written`. To enable it, you will need the following configuration

@@ -154,9 +154,14 @@ func (p *postgreSQLScraper) recordObfuscationFailures(ctx context.Context, rows 
 // text is never logged on the EXPLAIN path.
 func sqlErrorFields(err error) []zap.Field {
 	if pqErr, ok := errors.AsType[*pq.Error](err); ok {
+		category := pqErr.Code.Name()
+		if category == "" && strings.HasPrefix(string(pqErr.Code), "DBM") {
+			// [DBM P8] SQLSTATEs of the DBM explain function.
+			category = "dbm"
+		}
 		return []zap.Field{
 			zap.String("sqlState", string(pqErr.Code)),
-			zap.String("errorCategory", pqErr.Code.Name()),
+			zap.String("errorCategory", category),
 		}
 	}
 	category := "other"
