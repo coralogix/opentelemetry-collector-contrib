@@ -1,0 +1,35 @@
+receiver/postgresqlreceiver/query_text_privacy.go
+  s_f831f252c737d7::t_80dcb5708dbc7a 157-161,164
+receiver/postgresqlreceiver/documentation.md
+  s_f831f252c737d7::t_c66507fd154ec0 764
+receiver/postgresqlreceiver/internal/metadatatest/generated_telemetrytest.go
+  s_f831f252c737d7::t_ce79559808b0c4 27
+receiver/postgresqlreceiver/metadata.yaml
+  s_f831f252c737d7::t_1a497c8db671a7 842
+receiver/postgresqlreceiver/explain_function.go
+  s_f831f252c737d7::t_2e993de3d011f0 37-39,43-46,89-90,114-119,121-124,131,133,142-147,158-161,163,165-167,171,179-203,215,240-244,255-263,268-269,279-281,289-292,298-299,302-309,311,313-318,320,323,325,327,329,335,346-356,358-361,368,379
+  s_f831f252c737d7::t_17dcb8fccf424e 362,365
+receiver/postgresqlreceiver/scraper.go
+  s_f831f252c737d7::t_c320ee86bb4358 96-97,99-103,187-188,747-751
+receiver/postgresqlreceiver/internal/metadata/generated_telemetry.go
+  s_f831f252c737d7::t_f27e036b265683 64
+receiver/postgresqlreceiver/README.md
+  s_f831f252c737d7::t_f2263192880fd1 210-218,232-248
+  s_f831f252c737d7::t_0118b5e1c92a0c 249
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0707896dfdeddcca7e085a3afd907a5ff210c933",
+  "prompts": {},
+  "sessions": {
+    "s_f831f252c737d7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1d17d887-0e27-40f9-aede-50f0536246af",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "oded-dd <oded@coralogix.com>"
+    }
+  }
+}
