@@ -82,6 +82,9 @@ var brStatementExceptions = map[string][]string{
 	"prepare otel_%s as %s":                    {"prepare"},
 	"explain(format json) execute otel_%s%s":   {"execute"},
 	"deallocate prepare otel_%s":               {"deallocate", "prepare"},
+	// fork patch P8 (EC-04b): the statement_timeout of the explain-function
+	// call (SEC-02 C6), inside the call's read-only transaction only.
+	"set local statement_timeout = %d": {"set"},
 }
 
 // brNonSQLLiterals are Go literals that start like a statement but are not
@@ -134,6 +137,10 @@ var brAllowedFunctions = map[string]bool{
 	"to_char": true, "to_timestamp": true, "trim": true, "unnest": true,
 	// fork patch P7 (#48): the query-sample template reads octet_length(sa.query)
 	"octet_length": true,
+	// fork patch P8 (EC-04b): coralogix_dbm.explain_statement, the hardened
+	// SECURITY DEFINER explain function (ADR-0004 amendment, SEC-02). It is
+	// the only function name the receiver accepts for dbm.explain_function.
+	"explain_statement": true,
 }
 
 // brKeywordsBeforeParen are SQL words that may precede "(" without being a
@@ -564,6 +571,10 @@ func TestReceiverSQLAllowList(t *testing.T) {
 		"show server_version",
 		"from pg_stat_database_conflicts",
 		"from pg_statio_user_tables",
+		// fork patch P8 (EC-04b): the explain-function path is scanned too.
+		"select coralogix_dbm.explain_statement($1) as plan",
+		"select coralogix_dbm.explain_statement($1, $2::name[]) as plan",
+		"set local statement_timeout = %d",
 	} {
 		assert.Contains(t, joined.String(), want, "the scan missed a known statement")
 	}
@@ -776,6 +787,7 @@ var brSprintfExceptions = map[string]string{
 	"explainQuery:normalizedQueryID": "the pg_stat_statements queryid ('-' replaced by '_') names the prepared statement",
 	"explainQuery:nullsString":       `"(null, ...)" built from literal nulls, one per parameter`,
 	"explainQuery:query":             "the monitored statement itself, prepared and explained without ANALYZE (EXPLAIN-path exception; P8 replaces this path)",
+	"explainViaFunction:timeoutMS":   "an int64 in 1..2000 (config validation), formatted with %d into SET LOCAL statement_timeout (P8, SEC-02 C6)",
 }
 
 // brSQLHelpers return the SQL of their first argument plus quoted literals.

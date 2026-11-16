@@ -759,6 +759,20 @@ top query
 
 The following telemetry is emitted by this component.
 
+### otelcol_postgresql.explain_function.calls
+
+Number of plan requests handled with dbm.explain_function set, by outcome. not_eligible means the function refused the database (SQLSTATE DBM2x); the receiver then stops calling it for that database (skipped_not_eligible) until it restarts. rate_limited requests are retried on a later scrape. The statement text and server messages are never logged.
+
+| Unit | Metric Type | Value Type | Monotonic | Stability |
+| ---- | ----------- | ---------- | --------- | --------- |
+| {request} | Sum | Int | true | Development |
+
+#### Attributes
+
+| Name | Description | Values | Semantic Convention |
+| ---- | ----------- | ------ | ------------------- |
+| explain_outcome | The result of one statement's plan request to the explain function (DBM fork patch P8). | Str: ``ok``, ``not_eligible``, ``skipped_not_eligible``, ``rate_limited``, ``input_refused``, ``timeout_refused``, ``planning_failed``, ``error`` | - |
+
 ### otelcol_postgresql.query.obfuscation.failed
 
 Number of statements whose text failed obfuscation, by event. The record then carries an empty db.query.text, and the statement text is never logged.

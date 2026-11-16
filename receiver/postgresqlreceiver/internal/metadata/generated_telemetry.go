@@ -25,6 +25,7 @@ type TelemetryBuilder struct {
 	meter                            metric.Meter
 	mu                               sync.Mutex
 	registrations                    []metric.Registration
+	PostgresqlExplainFunctionCalls   metric.Int64Counter
 	PostgresqlQueryObfuscationFailed metric.Int64Counter
 	PostgresqlTopQueryCacheEvents    metric.Int64Counter
 }
@@ -58,6 +59,12 @@ func NewTelemetryBuilder(settings component.TelemetrySettings, options ...Teleme
 	}
 	builder.meter = Meter(settings)
 	var err, errs error
+	builder.PostgresqlExplainFunctionCalls, err = builder.meter.Int64Counter(
+		"otelcol_postgresql.explain_function.calls",
+		metric.WithDescription("Number of plan requests handled with dbm.explain_function set, by outcome. not_eligible means the function refused the database (SQLSTATE DBM2x); the receiver then stops calling it for that database (skipped_not_eligible) until it restarts. rate_limited requests are retried on a later scrape. The statement text and server messages are never logged. [Development]"),
+		metric.WithUnit("{request}"),
+	)
+	errs = errors.Join(errs, err)
 	builder.PostgresqlQueryObfuscationFailed, err = builder.meter.Int64Counter(
 		"otelcol_postgresql.query.obfuscation.failed",
 		metric.WithDescription("Number of statements whose text failed obfuscation, by event. The record then carries an empty db.query.text, and the statement text is never logged. [Development]"),

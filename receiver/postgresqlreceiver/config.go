@@ -98,6 +98,22 @@ type DBMConfig struct {
 	// unless a Full capture lease applies, so it must run in every pipeline
 	// that receives these records.
 	AllowLiteralCapture bool `mapstructure:"allow_literal_capture"`
+	// ExplainFunction, when set, makes the receiver get each estimated plan
+	// by calling this function (DBM fork patch P8) instead of running its own
+	// PREPARE and EXPLAIN. The only accepted value is
+	// coralogix_dbm.explain_statement (grants/postgres-plans-definer.sql).
+	// There is no fallback: when the call fails, that statement gets no plan.
+	ExplainFunction string `mapstructure:"explain_function"`
+	// ExplainFunctionTimeout is the statement_timeout set for each call,
+	// 1ms to 2s (the function refuses any other value). 0 means 1s.
+	ExplainFunctionTimeout time.Duration `mapstructure:"explain_function_timeout"`
+	// ExplainFunctionSchemas, when set, is passed to the function as its
+	// optional schemas argument, so that unqualified table names resolve in
+	// these schemas. The function accepts only schemas its installer listed.
+	ExplainFunctionSchemas []string `mapstructure:"explain_function_schemas"`
+	// ExplainFunctionMaxCallsPerMinute caps the calls to the function, 1 to
+	// 600 per minute. 0 means 30.
+	ExplainFunctionMaxCallsPerMinute int `mapstructure:"explain_function_max_calls_per_minute"`
 	// prevent unkeyed literal initialization
 	_ struct{}
 }
