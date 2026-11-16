@@ -67,31 +67,8 @@ func explainFunctionTxOptions() *sql.TxOptions {
 // a pooled connection. There is no fallback to PREPARE / EXPLAIN: any error
 // is returned and the statement gets no plan. The caller logs the error by
 // SQLSTATE only.
-func (c *postgreSQLClient) explainViaFunction(ctx context.Context, query, _ string, opts explainFunctionOptions, _ *zap.Logger) (string, error) {
-	tx, err := c.client.BeginTx(ctx, explainFunctionTxOptions())
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	timeoutMS := opts.timeoutMS
-	if _, err = tx.ExecContext(ctx, fmt.Sprintf(explainFunctionTimeoutSQL, timeoutMS)); err != nil {
-		return "", err
-	}
-
-	var raw sql.NullString
-	if len(opts.schemas) == 0 {
-		err = tx.QueryRowContext(ctx, explainFunctionCallSQL, query).Scan(&raw)
-	} else {
-		err = tx.QueryRowContext(ctx, explainFunctionCallSchemasSQL, query, pq.Array(opts.schemas)).Scan(&raw)
-	}
-	if err != nil {
-		return "", err
-	}
-	if !raw.Valid || raw.String == "" {
-		return "", nil
-	}
-	return obfuscateSQLExecPlan(raw.String)
+func (*postgreSQLClient) explainViaFunction(context.Context, string, explainFunctionOptions, *zap.Logger) (string, error) {
+	return "", errors.New("RED STUB: P8 queryid input")
 }
 
 // stripLeadingComments removes the whitespace and comments before the first
@@ -288,7 +265,8 @@ func (p *postgreSQLScraper) planFromFunction(ctx context.Context, clientFactory 
 		}
 	}()
 
-	plan, err := dbClient.explainViaFunction(ctx, input, queryID, p.config.DBM.explainFunctionOptions(), logger)
+	_ = input
+	plan, err := dbClient.explainViaFunction(ctx, queryID, p.config.DBM.explainFunctionOptions(), logger)
 	outcome := explainFunctionOutcome(err)
 	p.recordExplainOutcome(ctx, outcome)
 	if outcome == metadata.AttributeExplainOutcomeNotEligible {

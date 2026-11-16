@@ -572,8 +572,7 @@ func TestReceiverSQLAllowList(t *testing.T) {
 		"from pg_stat_database_conflicts",
 		"from pg_statio_user_tables",
 		// fork patch P8 (EC-04b): the explain-function path is scanned too.
-		"select coralogix_dbm.explain_statement($1) as plan",
-		"select coralogix_dbm.explain_statement($1, $2::name[]) as plan",
+		"select coralogix_dbm.explain_statement($1::bigint, $2::name[]) as plan",
 		"set local statement_timeout = %d",
 	} {
 		assert.Contains(t, joined.String(), want, "the scan missed a known statement")

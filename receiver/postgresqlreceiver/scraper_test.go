@@ -2394,7 +2394,7 @@ func (*mockClient) explainQuery(context.Context, string, string, *zap.Logger) (s
 }
 
 // explainViaFunction implements client.
-func (*mockClient) explainViaFunction(context.Context, string, string, explainFunctionOptions, *zap.Logger) (string, error) {
+func (*mockClient) explainViaFunction(context.Context, string, explainFunctionOptions, *zap.Logger) (string, error) {
 	panic("unimplemented")
 }
 

@@ -37,9 +37,10 @@ const (
 	p8Statement2 = "SELECT b FROM orders WHERE id = $1"
 	p8Plan       = `[{"Plan":{"Node Type":"Seq Scan","Relation Name":"accounts","Alias":"accounts"}}]`
 	// The exact SQL the receiver may send on the explain-function path.
-	p8Call        = "/* otel-collector-ignore */ SELECT coralogix_dbm.explain_statement($1) AS plan"
-	p8CallSchemas = "/* otel-collector-ignore */ SELECT coralogix_dbm.explain_statement($1, $2::name[]) AS plan"
-	p8MetricName  = "otelcol_postgresql.explain_function.calls"
+	// The only SQL the receiver sends on this path: the queryid and the
+	// optional schemas, never the statement text (requester, 2026-11-16).
+	p8Call       = "/* otel-collector-ignore */ SELECT coralogix_dbm.explain_statement($1::bigint, $2::name[]) AS plan"
+	p8MetricName = "otelcol_postgresql.explain_function.calls"
 )
 
 func p8SetTimeout(ms int64) string {
@@ -77,10 +78,10 @@ func TestExplainViaFunctionCallsTheFunction(t *testing.T) {
 	client, mock := p8Client(t)
 	mock.ExpectBegin()
 	mock.ExpectExec(p8SetTimeout(1000)).WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectQuery(p8Call).WithArgs(p8Statement).WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(p8Plan))
+	mock.ExpectQuery(p8Call).WithArgs(int64(42), nil).WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(p8Plan))
 	mock.ExpectRollback()
 
-	plan, err := client.explainViaFunction(t.Context(), p8Statement, "42", explainFunctionOptions{timeoutMS: 1000}, zap.NewNop())
+	plan, err := client.explainViaFunction(t.Context(), "42", explainFunctionOptions{timeoutMS: 1000}, zap.NewNop())
 	require.NoError(t, err)
 	assert.Equal(t, p8ObfuscatedPlan(t), plan)
 	require.NoError(t, mock.ExpectationsWereMet(), "only BEGIN, SET LOCAL statement_timeout, the function call and ROLLBACK are sent")
@@ -90,11 +91,11 @@ func TestExplainViaFunctionPassesSchemasAndTimeout(t *testing.T) {
 	client, mock := p8Client(t)
 	mock.ExpectBegin()
 	mock.ExpectExec(p8SetTimeout(250)).WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectQuery(p8CallSchemas).WithArgs(p8Statement, `{"app","billing"}`).
+	mock.ExpectQuery(p8Call).WithArgs(int64(42), `{"app","billing"}`).
 		WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(p8Plan))
 	mock.ExpectRollback()
 
-	plan, err := client.explainViaFunction(t.Context(), p8Statement, "42",
+	plan, err := client.explainViaFunction(t.Context(), "42",
 		explainFunctionOptions{timeoutMS: 250, schemas: []string{"app", "billing"}}, zap.NewNop())
 	require.NoError(t, err)
 	assert.Equal(t, p8ObfuscatedPlan(t), plan)
@@ -105,10 +106,10 @@ func TestExplainViaFunctionNullPlan(t *testing.T) {
 	client, mock := p8Client(t)
 	mock.ExpectBegin()
 	mock.ExpectExec(p8SetTimeout(1000)).WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectQuery(p8Call).WithArgs(p8Statement).WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(nil))
+	mock.ExpectQuery(p8Call).WithArgs(int64(42), nil).WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(nil))
 	mock.ExpectRollback()
 
-	plan, err := client.explainViaFunction(t.Context(), p8Statement, "42", explainFunctionOptions{timeoutMS: 1000}, zap.NewNop())
+	plan, err := client.explainViaFunction(t.Context(), "42", explainFunctionOptions{timeoutMS: 1000}, zap.NewNop())
 	require.NoError(t, err)
 	assert.Empty(t, plan)
 	require.NoError(t, mock.ExpectationsWereMet())
@@ -122,10 +123,10 @@ func TestExplainViaFunctionErrorHasNoFallback(t *testing.T) {
 			client, mock := p8Client(t)
 			mock.ExpectBegin()
 			mock.ExpectExec(p8SetTimeout(1000)).WillReturnResult(sqlmock.NewResult(0, 0))
-			mock.ExpectQuery(p8Call).WithArgs(p8Statement).WillReturnError(p8PQError(code))
+			mock.ExpectQuery(p8Call).WithArgs(int64(42), nil).WillReturnError(p8PQError(code))
 			mock.ExpectRollback()
 
-			plan, err := client.explainViaFunction(t.Context(), p8Statement, "42", explainFunctionOptions{timeoutMS: 1000}, zap.NewNop())
+			plan, err := client.explainViaFunction(t.Context(), "42", explainFunctionOptions{timeoutMS: 1000}, zap.NewNop())
 			var pqErr *pq.Error
 			require.ErrorAs(t, err, &pqErr)
 			assert.Equal(t, code, string(pqErr.Code))
@@ -141,9 +142,36 @@ func TestExplainViaFunctionSetTimeoutFailure(t *testing.T) {
 	mock.ExpectExec(p8SetTimeout(1000)).WillReturnError(p8PQError("42501"))
 	mock.ExpectRollback()
 
-	_, err := client.explainViaFunction(t.Context(), p8Statement, "42", explainFunctionOptions{timeoutMS: 1000}, zap.NewNop())
+	_, err := client.explainViaFunction(t.Context(), "42", explainFunctionOptions{timeoutMS: 1000}, zap.NewNop())
 	require.Error(t, err)
 	require.NoError(t, mock.ExpectationsWereMet(), "the function is not called without the timeout")
+}
+
+// TestExplainViaFunctionPassesTheQueryID: pg_stat_statements queryids are
+// signed 64-bit; the full range is passed as a bigint.
+func TestExplainViaFunctionPassesTheQueryID(t *testing.T) {
+	for _, id := range []int64{-9223372036854775808, -1, 9223372036854775807} {
+		client, mock := p8Client(t)
+		mock.ExpectBegin()
+		mock.ExpectExec(p8SetTimeout(1000)).WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectQuery(p8Call).WithArgs(id, nil).WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(p8Plan))
+		mock.ExpectRollback()
+
+		_, err := client.explainViaFunction(t.Context(), fmt.Sprint(id), explainFunctionOptions{timeoutMS: 1000}, zap.NewNop())
+		require.NoError(t, err)
+		require.NoError(t, mock.ExpectationsWereMet())
+	}
+}
+
+// TestExplainViaFunctionRejectsABadQueryID: nothing is sent for a queryid
+// that is not a bigint.
+func TestExplainViaFunctionRejectsABadQueryID(t *testing.T) {
+	for _, id := range []string{"", "abc", "4242; SELECT", "9223372036854775808"} {
+		client, mock := p8Client(t)
+		_, err := client.explainViaFunction(t.Context(), id, explainFunctionOptions{timeoutMS: 1000}, zap.NewNop())
+		require.Error(t, err, "queryid %q", id)
+		require.NoError(t, mock.ExpectationsWereMet())
+	}
 }
 
 func TestExplainFunctionTxIsReadOnly(t *testing.T) {
@@ -203,6 +231,7 @@ func TestExplainFunctionOutcome(t *testing.T) {
 		{"DBM20 temporary objects", p8PQError("DBM20"), metadata.AttributeExplainOutcomeNotEligible},
 		{"DBM21 untrusted role", p8PQError("DBM21"), metadata.AttributeExplainOutcomeNotEligible},
 		{"DBM29 any DBM2x", p8PQError("DBM29"), metadata.AttributeExplainOutcomeNotEligible},
+		{"DBM22 any new DBM2x, e.g. $n on PG 13-15 (W0-07b, code pending)", p8PQError("DBM22"), metadata.AttributeExplainOutcomeNotEligible},
 		{"wrapped DBM21", fmt.Errorf("explain: %w", p8PQError("DBM21")), metadata.AttributeExplainOutcomeNotEligible},
 		{"DBM10 timeout", p8PQError("DBM10"), metadata.AttributeExplainOutcomeTimeoutRefused},
 		{"DBM11 empty or long", p8PQError("DBM11"), metadata.AttributeExplainOutcomeInputRefused},
@@ -335,10 +364,11 @@ func newP8Harness(t *testing.T, dbm DBMConfig) *p8Harness {
 	return &p8Harness{scraper: scraper, mock: mock, tel: tel, observed: observed}
 }
 
-func (h *p8Harness) expectCall(timeoutMS int64, statement string) *sqlmock.ExpectedQuery {
+func (h *p8Harness) expectCall(timeoutMS, queryID int64) *sqlmock.ExpectedQuery {
 	h.mock.ExpectBegin()
 	h.mock.ExpectExec(regexp.QuoteMeta(p8SetTimeout(timeoutMS))).WillReturnResult(sqlmock.NewResult(0, 0))
-	q := h.mock.ExpectQuery(regexp.QuoteMeta(p8Call)).WithArgs(statement)
+	// The arguments are the queryid and the schemas: never the statement text.
+	q := h.mock.ExpectQuery(regexp.QuoteMeta(p8Call)).WithArgs(queryID, nil)
 	h.mock.ExpectRollback()
 	return q
 }
@@ -375,8 +405,8 @@ func TestTopQueryExplainFunctionGetsThePlan(t *testing.T) {
 	primeTopQueryCache(h.scraper, "postgres", "10", "4242")
 	h.mock.ExpectQuery("LIMIT 10").WillReturnRows(sqlmock.NewRows(topQueryColumns).
 		AddRow(p8TopQueryRow("4242", "/* app=checkout */ -- c\n"+p8Statement, "10")...))
-	// C4: the leading comments are stripped before the call.
-	h.expectCall(1000, p8Statement).WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(p8Plan))
+	// The statement text (with its comments) is never sent: only the queryid.
+	h.expectCall(1000, 4242).WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(p8Plan))
 
 	logs, err := h.scraper.scrapeTopQuery(t.Context(), 10, 10, 10, 0)
 	require.NoError(t, err)
@@ -390,7 +420,7 @@ func TestTopQueryExplainFunctionNotEligibleStopsCalls(t *testing.T) {
 	h := newP8Harness(t, DBMConfig{ExplainFunction: explainFunctionName})
 	primeTopQueryCache(h.scraper, "postgres", "10", "4242")
 	h.mock.ExpectQuery("LIMIT 10").WillReturnRows(sqlmock.NewRows(topQueryColumns).AddRow(p8TopQueryRow("4242", p8Statement, "10")...))
-	h.expectCall(1000, p8Statement).WillReturnError(p8PQError("DBM21"))
+	h.expectCall(1000, 4242).WillReturnError(p8PQError("DBM21"))
 
 	logs, err := h.scraper.scrapeTopQuery(t.Context(), 10, 10, 10, 0)
 	require.NoError(t, err)
@@ -424,7 +454,7 @@ func TestTopQueryExplainFunctionRateLimited(t *testing.T) {
 	h.mock.ExpectQuery("LIMIT 10").WillReturnRows(sqlmock.NewRows(topQueryColumns).
 		AddRow(p8TopQueryRow("4242", p8Statement, "20")...).
 		AddRow(p8TopQueryRow("4343", p8Statement2, "10")...))
-	h.expectCall(1000, p8Statement).WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(p8Plan))
+	h.expectCall(1000, 4242).WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(p8Plan))
 	logs, err := h.scraper.scrapeTopQuery(t.Context(), 10, 10, 10, 0)
 	require.NoError(t, err)
 	require.NoError(t, h.mock.ExpectationsWereMet())
@@ -437,7 +467,7 @@ func TestTopQueryExplainFunctionRateLimited(t *testing.T) {
 	h.mock.ExpectQuery("LIMIT 10").WillReturnRows(sqlmock.NewRows(topQueryColumns).
 		AddRow(p8TopQueryRow("4242", p8Statement, "30")...).
 		AddRow(p8TopQueryRow("4343", p8Statement2, "30")...))
-	h.expectCall(1000, p8Statement2).WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(p8Plan))
+	h.expectCall(1000, 4343).WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(p8Plan))
 	logs, err = h.scraper.scrapeTopQuery(t.Context(), 10, 10, 10, 0)
 	require.NoError(t, err)
 	require.NoError(t, h.mock.ExpectationsWereMet())
@@ -450,7 +480,7 @@ func TestTopQueryExplainFunctionFailureLogsSQLStateOnly(t *testing.T) {
 	h := newP8Harness(t, DBMConfig{ExplainFunction: explainFunctionName, ExplainFunctionTimeout: 300 * time.Millisecond})
 	primeTopQueryCache(h.scraper, "postgres", "10", "4242")
 	h.mock.ExpectQuery("LIMIT 10").WillReturnRows(sqlmock.NewRows(topQueryColumns).AddRow(p8TopQueryRow("4242", p7Explainable, "10")...))
-	h.expectCall(300, p7Explainable).WillReturnError(p8PQError("DBM30"))
+	h.expectCall(300, 4242).WillReturnError(p8PQError("DBM30"))
 
 	logs, err := h.scraper.scrapeTopQuery(t.Context(), 10, 10, 10, 0)
 	require.NoError(t, err)
