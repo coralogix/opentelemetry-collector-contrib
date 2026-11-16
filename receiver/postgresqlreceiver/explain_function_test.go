@@ -178,46 +178,27 @@ func TestExplainFunctionTxIsReadOnly(t *testing.T) {
 	assert.True(t, explainFunctionTxOptions().ReadOnly)
 }
 
-func TestStripLeadingComments(t *testing.T) {
-	for _, tc := range []struct{ in, want string }{
-		{"SELECT 1", "SELECT 1"},
-		{"  \n\tSELECT 1", "SELECT 1"},
-		{"/* app=checkout */ SELECT 1", "SELECT 1"},
-		{"/**/SELECT 1", "SELECT 1"},
-		{"-- note\nSELECT 1", "SELECT 1"},
-		{"/* a */ -- b\n /* c */SELECT 1", "SELECT 1"},
-		{"/* a /* nested */ still a comment */ SELECT 1", "SELECT 1"},
-		{"/*/ x */ SELECT 1", "SELECT 1"},
-		{"/* unterminated SELECT 1", ""},
-		{"/* a /* nested */ unterminated SELECT 1", ""},
-		{"-- only a comment", ""},
-		{"", ""},
-		{"SELECT /* kept */ 1", "SELECT /* kept */ 1"},
-		{"SELECT 1 -- kept", "SELECT 1 -- kept"},
-	} {
-		assert.Equal(t, tc.want, stripLeadingComments(tc.in), "input %q", tc.in)
-	}
-}
-
+// TestExplainFunctionInput: the local filter does no comment handling
+// (W0-07b: the function strips comments itself). A statement that starts
+// with a comment is left to the function; only a statement whose first word
+// is plainly not SELECT or WITH is skipped. The text is never sent.
 func TestExplainFunctionInput(t *testing.T) {
 	for _, tc := range []struct {
-		in   string
-		want string
-		ok   bool
+		in string
+		ok bool
 	}{
-		{"/* app */ SELECT a FROM t WHERE id = $1", "SELECT a FROM t WHERE id = $1", true},
-		{"select a from t", "select a from t", true},
-		{"-- x\n WITH x AS (SELECT a FROM t) SELECT * FROM x", "WITH x AS (SELECT a FROM t) SELECT * FROM x", true},
-		{"(SELECT a FROM t)", "", false},
-		{"UPDATE t SET a = $1", "", false},
-		{"/* SELECT */ DELETE FROM t", "", false},
-		{"SELECTED", "", false},
-		{"/* unterminated", "", false},
-		{"", "", false},
+		{"SELECT a FROM t WHERE id = $1", true},
+		{"select a from t", true},
+		{"  WITH x AS (SELECT a FROM t) SELECT * FROM x", true},
+		{"/* app */ SELECT a FROM t", true},
+		{"-- note\nUPDATE t SET a = $1", true},
+		{"/* unterminated", true},
+		{"(SELECT a FROM t)", false},
+		{"UPDATE t SET a = $1", false},
+		{"SELECTED", false},
+		{"", false},
 	} {
-		got, ok := explainFunctionInput(tc.in)
-		assert.Equal(t, tc.ok, ok, "input %q", tc.in)
-		assert.Equal(t, tc.want, got, "input %q", tc.in)
+		assert.Equal(t, tc.ok, explainFunctionInput(tc.in), "input %q", tc.in)
 	}
 }
 
@@ -250,6 +231,7 @@ func TestExplainFunctionOutcome(t *testing.T) {
 		{"DBM15 schema not allowed is a per-database configuration mismatch", p8PQError("DBM15"), metadata.AttributeExplainOutcomeNotEligible},
 		{"DBM16 forbidden function", p8PQError("DBM16"), metadata.AttributeExplainOutcomeInputRefused},
 		{"DBM30 planning", p8PQError("DBM30"), metadata.AttributeExplainOutcomePlanningFailed},
+		{"DBM30 also for 42P18 ($n type not inferred), per statement", p8PQError("DBM30"), metadata.AttributeExplainOutcomePlanningFailed},
 		{"57014 canceled by statement_timeout", p8PQError("57014"), metadata.AttributeExplainOutcomeError},
 		{"DB021 not DBM2x", p8PQError("DB021"), metadata.AttributeExplainOutcomeError},
 		{"not a database error", errors.New("boom"), metadata.AttributeExplainOutcomeError},

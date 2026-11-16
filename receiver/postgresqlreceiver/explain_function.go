@@ -146,7 +146,13 @@ func stripLeadingComments(query string) string {
 // explainFunctionInput returns the statement without its leading comments
 // and whether it is a SELECT or WITH statement, the only ones the function
 // accepts (SEC-02 C5). It is a local filter: the text is never sent.
-func explainFunctionInput(query string) (string, bool) {
+func explainFunctionInput(query string) bool {
+	_, ok := explainFunctionInputOld(query)
+	return ok
+}
+
+// explainFunctionInputOld is the previous filter. RED STUB.
+func explainFunctionInputOld(query string) (string, bool) {
 	s := stripLeadingComments(query)
 	end := strings.IndexFunc(s, func(r rune) bool { return !isIdentRune(r) })
 	if end < 0 {
@@ -286,7 +292,7 @@ func (p *postgreSQLScraper) planFromFunction(ctx context.Context, clientFactory 
 	}
 	// A local check only: the text is never sent. The function accepts
 	// SELECT and WITH only, so other statements are not worth a call.
-	if _, ok := explainFunctionInput(rawQuery); !ok {
+	if !explainFunctionInput(rawQuery) {
 		p.queryPlanCache.Add(planCacheKey, "")
 		return ""
 	}
