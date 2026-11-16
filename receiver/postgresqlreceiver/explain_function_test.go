@@ -687,3 +687,31 @@ func TestTopQueryExplainFunctionBudgetCountsCallsOnly(t *testing.T) {
 	require.NoError(t, h.mock.ExpectationsWereMet())
 	assert.Equal(t, map[string]string{"3": p8ObfuscatedPlan(t)}, queryPlans(logs))
 }
+
+// TestTopQueryExplainFunctionStatementRetryAfter24h (requester D5,
+// 2026-11-16): a statement refused with DBM24/DBM25 is not called again for
+// 24 hours, then once more: a bounded exception to "never retry DBM2x".
+func TestTopQueryExplainFunctionStatementRetryAfter24h(t *testing.T) {
+	h := newP8Harness(t, DBMConfig{ExplainFunction: explainFunctionName})
+	now := time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC)
+	h.scraper.now = func() time.Time { return now }
+	scrape := func() plog.Logs {
+		t.Helper()
+		primeTopQueryCache(h.scraper, "postgres", "10", "4242")
+		h.scraper.queryPlanCache.Purge()
+		h.mock.ExpectQuery("LIMIT 10").WillReturnRows(sqlmock.NewRows(topQueryColumns).AddRow(p8TopQueryRow("4242", p8Statement, "10")...))
+		logs, err := h.scraper.scrapeTopQuery(t.Context(), 10, 10, 10, 0)
+		require.NoError(t, err)
+		require.NoError(t, h.mock.ExpectationsWereMet())
+		return logs
+	}
+	h.expectCall(1000, 4242).WillReturnError(p8PQError("DBM25"))
+	scrape()
+	now = now.Add(24*time.Hour - time.Second)
+	scrape() // still remembered: no call
+	now = now.Add(2 * time.Second)
+	h.expectCall(1000, 4242).WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(p8Plan))
+	logs := scrape() // retried once after 24 h
+	assert.Equal(t, map[string]string{"4242": p8ObfuscatedPlan(t)}, queryPlans(logs))
+	h.assertCalls(t, map[string]int64{"statement_not_eligible": 1, "ok": 1})
+}
