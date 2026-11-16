@@ -155,9 +155,10 @@ func isIdentRune(r rune) bool {
 }
 
 // explainFunctionOutcome classifies a call result by the SQLSTATE the
-// function raises (SEC-02 draft): DBM10 caller timeout refused, DBM11-DBM14
-// input refused, DBM2x database not eligible (temporary objects, untrusted
-// roles), DBM30 planning failed. Anything else is an error.
+// function raises (grants/postgres-plans-definer.sql, W0-07b): DBM10 caller
+// timeout refused, DBM11-DBM14 input refused, DBM15 schema not allowed (a
+// refused request too), DBM2x database not eligible (temporary objects,
+// untrusted roles), DBM30 planning failed. Anything else is an error.
 func explainFunctionOutcome(err error) metadata.AttributeExplainOutcome {
 	if err == nil {
 		return metadata.AttributeExplainOutcomeOk
@@ -172,7 +173,7 @@ func explainFunctionOutcome(err error) metadata.AttributeExplainOutcome {
 		return metadata.AttributeExplainOutcomeNotEligible
 	case code == "DBM10":
 		return metadata.AttributeExplainOutcomeTimeoutRefused
-	case code == "DBM11", code == "DBM12", code == "DBM13", code == "DBM14":
+	case code == "DBM11", code == "DBM12", code == "DBM13", code == "DBM14", code == "DBM15":
 		return metadata.AttributeExplainOutcomeInputRefused
 	case code == "DBM30":
 		return metadata.AttributeExplainOutcomePlanningFailed
