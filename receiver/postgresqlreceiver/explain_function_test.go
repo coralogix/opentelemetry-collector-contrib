@@ -472,6 +472,8 @@ func TestTopQueryExplainFunctionNotEligibleStopsCalls(t *testing.T) {
 // explained.
 func TestTopQueryExplainFunctionStatementNotEligible(t *testing.T) {
 	h := newP8Harness(t, DBMConfig{ExplainFunction: explainFunctionName})
+	now := time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC)
+	h.scraper.now = func() time.Time { return now }
 	primeTopQueryCache(h.scraper, "postgres", "10", "4242")
 	h.mock.ExpectQuery("LIMIT 10").WillReturnRows(sqlmock.NewRows(topQueryColumns).AddRow(p8TopQueryRow("4242", p8Statement, "10")...))
 	h.expectCall(1000, 4242).WillReturnError(p8PQError("DBM24"))
@@ -480,6 +482,8 @@ func TestTopQueryExplainFunctionStatementNotEligible(t *testing.T) {
 	require.NoError(t, h.mock.ExpectationsWereMet())
 
 	// The plan cache forgets the statement (TTL); the refusal is still kept.
+	// A minute later, so the rate limiter (evenly spaced calls) allows one.
+	now = now.Add(time.Minute)
 	h.scraper.queryPlanCache.Purge()
 	primeTopQueryCache(h.scraper, "postgres", "10", "4343")
 	h.mock.ExpectQuery("LIMIT 10").WillReturnRows(sqlmock.NewRows(topQueryColumns).
