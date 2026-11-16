@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -37,14 +38,19 @@ const (
 	maxSchemaNameBytes = 63
 )
 
-// The statements of the explain-function path. The function itself checks
-// the input, plans it as a generic plan and returns JSON; see
-// grants/postgres-plans-definer.sql (W0-07b).
+// The statements of the explain-function path. The function takes the
+// pg_stat_statements queryid, reads the statement text itself, checks it,
+// plans it as a generic plan and returns JSON; see
+// grants/postgres-plans-definer.sql (W0-07b). The receiver never sends
+// statement text (requester decision 2026-11-16). This is the only call.
 const (
-	explainFunctionTimeoutSQL     = "/* otel-collector-ignore */ SET LOCAL statement_timeout = %d"
-	explainFunctionCallSQL        = "/* otel-collector-ignore */ SELECT coralogix_dbm.explain_statement($1) AS plan"
-	explainFunctionCallSchemasSQL = "/* otel-collector-ignore */ SELECT coralogix_dbm.explain_statement($1, $2::name[]) AS plan"
+	explainFunctionTimeoutSQL = "/* otel-collector-ignore */ SET LOCAL statement_timeout = %d"
+	explainFunctionCallSQL    = "/* otel-collector-ignore */ SELECT coralogix_dbm.explain_statement($1::bigint, $2::name[]) AS plan"
 )
+
+// errExplainFunctionQueryID is returned, before anything is sent, for a
+// queryid that is not a bigint.
+var errExplainFunctionQueryID = errors.New("explain function: queryid is not a bigint")
 
 // explainFunctionOptions are the per-call settings.
 type explainFunctionOptions struct {
@@ -63,17 +69,40 @@ func explainFunctionTxOptions() *sql.TxOptions {
 // explainViaFunction implements client. It runs, in one read-only
 // transaction that is always rolled back: SET LOCAL statement_timeout (the
 // function refuses to run without a 1-2000 ms caller timeout, C6), then the
-// function call. SET LOCAL ends with the transaction, so nothing stays set on
-// a pooled connection. There is no fallback to PREPARE / EXPLAIN: any error
-// is returned and the statement gets no plan. The caller logs the error by
-// SQLSTATE only.
-func (*postgreSQLClient) explainViaFunction(context.Context, string, explainFunctionOptions, *zap.Logger) (string, error) {
-	return "", errors.New("RED STUB: P8 queryid input")
+// function call with the pg_stat_statements queryid and the optional
+// schemas (C12). The statement text is never sent. SET LOCAL ends with the
+// transaction, so nothing stays set on a pooled connection. There is no
+// fallback to PREPARE / EXPLAIN: any error is returned and the statement
+// gets no plan. The caller logs the error by SQLSTATE only.
+func (c *postgreSQLClient) explainViaFunction(ctx context.Context, queryID string, opts explainFunctionOptions, _ *zap.Logger) (string, error) {
+	id, err := strconv.ParseInt(queryID, 10, 64)
+	if err != nil {
+		return "", errExplainFunctionQueryID
+	}
+	tx, err := c.client.BeginTx(ctx, explainFunctionTxOptions())
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	timeoutMS := opts.timeoutMS
+	if _, err = tx.ExecContext(ctx, fmt.Sprintf(explainFunctionTimeoutSQL, timeoutMS)); err != nil {
+		return "", err
+	}
+
+	var raw sql.NullString
+	if err = tx.QueryRowContext(ctx, explainFunctionCallSQL, id, pq.Array(opts.schemas)).Scan(&raw); err != nil {
+		return "", err
+	}
+	if !raw.Valid || raw.String == "" {
+		return "", nil
+	}
+	return obfuscateSQLExecPlan(raw.String)
 }
 
 // stripLeadingComments removes the whitespace and comments before the first
-// token of a statement (C4: the function refuses any comment, so that the
-// database side needs no lexer). Block comments nest, as in PostgreSQL. An
+// token of a statement, for the local SELECT/WITH check (the text itself is
+// never sent). Block comments nest, as in PostgreSQL. An
 // unterminated leading comment, or text that is only comments, yields "".
 // Comments after the first token are kept; the function refuses them.
 func stripLeadingComments(query string) string {
@@ -111,9 +140,9 @@ func stripLeadingComments(query string) string {
 	}
 }
 
-// explainFunctionInput returns the text sent to the function and whether to
-// send it: leading comments stripped, and only SELECT or WITH statements,
-// the only ones the function accepts (SEC-02 C5).
+// explainFunctionInput returns the statement without its leading comments
+// and whether it is a SELECT or WITH statement, the only ones the function
+// accepts (SEC-02 C5). It is a local filter: the text is never sent.
 func explainFunctionInput(query string) (string, bool) {
 	s := stripLeadingComments(query)
 	end := strings.IndexFunc(s, func(r rune) bool { return !isIdentRune(r) })
@@ -133,9 +162,8 @@ func isIdentRune(r rune) bool {
 
 // explainFunctionOutcome classifies a call result by the SQLSTATE the
 // function raises (grants/postgres-plans-definer.sql, W0-07b): DBM10 caller
-// timeout refused, DBM11-DBM14 input refused, DBM15 schema not allowed (a
-// refused request too), DBM2x database not eligible (temporary objects,
-// untrusted roles), DBM30 planning failed. Anything else is an error.
+// timeout refused, DBM11-DBM15 request refused, every DBM2x database not
+// eligible (no retry), DBM30 planning failed. Anything else is an error.
 func explainFunctionOutcome(err error) metadata.AttributeExplainOutcome {
 	if err == nil {
 		return metadata.AttributeExplainOutcomeOk
@@ -244,8 +272,9 @@ func (p *postgreSQLScraper) planFromFunction(ctx context.Context, clientFactory 
 		p.recordExplainOutcome(ctx, metadata.AttributeExplainOutcomeSkippedNotEligible)
 		return ""
 	}
-	input, ok := explainFunctionInput(rawQuery)
-	if !ok {
+	// A local check only: the text is never sent. The function accepts
+	// SELECT and WITH only, so other statements are not worth a call.
+	if _, ok := explainFunctionInput(rawQuery); !ok {
 		p.queryPlanCache.Add(planCacheKey, "")
 		return ""
 	}
@@ -265,7 +294,6 @@ func (p *postgreSQLScraper) planFromFunction(ctx context.Context, clientFactory 
 		}
 	}()
 
-	_ = input
 	plan, err := dbClient.explainViaFunction(ctx, queryID, p.config.DBM.explainFunctionOptions(), logger)
 	outcome := explainFunctionOutcome(err)
 	p.recordExplainOutcome(ctx, outcome)

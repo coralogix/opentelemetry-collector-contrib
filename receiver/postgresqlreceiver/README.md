@@ -222,8 +222,10 @@ receivers:
 ```
 
 Each call runs in its own read-only transaction: `SET LOCAL statement_timeout`, then
-`SELECT coralogix_dbm.explain_statement($1[, $2])`, then a rollback. Leading comments are removed
-from the statement first, and only `SELECT` and `WITH` statements are sent. Errors are logged by
+`SELECT coralogix_dbm.explain_statement($1::bigint, $2::name[])` with the `pg_stat_statements`
+`queryid` and the configured schemas, then a rollback. The receiver never sends statement text: the
+function reads the statement from `pg_stat_statements` itself. Only `SELECT` and `WITH` statements
+are requested. Errors are logged by
 SQLSTATE only, never by message or statement text. When the function refuses the database itself
 (SQLSTATE `DBM2x`, for example an untrusted role that can create objects), the receiver logs one
 warning, `plans unavailable: database not eligible for the explain function`, and stops calling the
