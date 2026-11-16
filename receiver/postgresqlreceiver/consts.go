@@ -36,6 +36,9 @@ const (
 	querySampleColumnUsename              = "usename"
 	querySampleColumnWaitEvent            = "wait_event"
 	querySampleColumnWaitEventType        = "wait_event_type"
+	// [DBM P7] truncation inputs
+	querySampleColumnQueryOctetLength       = "query_octet_length"
+	querySampleColumnTrackActivityQuerySize = "track_activity_query_size"
 	// Blocking session columns
 	querySampleColumnBlockingPIDs         = "blocking_pids"
 	querySampleColumnBlockingStartTime    = "blocking_start_time"

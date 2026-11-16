@@ -16,6 +16,9 @@ SELECT
     EXTRACT(EPOCH FROM sa.query_start) AS _query_start_timestamp,
     sa.state,
     sa.query,
+    -- [DBM P7] pg_stat_activity.query is cut to track_activity_query_size - 1 bytes.
+    COALESCE(octet_length(sa.query), 0)::TEXT AS query_octet_length,
+    COALESCE((SELECT setting FROM pg_settings WHERE name = 'track_activity_query_size'), '') AS track_activity_query_size,
     CASE
     WHEN sa.state = 'active' THEN
       EXTRACT(EPOCH FROM (clock_timestamp() - sa.query_start)) * 1e3

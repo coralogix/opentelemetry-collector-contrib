@@ -22,10 +22,11 @@ func Tracer(settings component.TelemetrySettings) trace.Tracer {
 // TelemetryBuilder provides an interface for components to report telemetry
 // as defined in metadata and user config.
 type TelemetryBuilder struct {
-	meter                         metric.Meter
-	mu                            sync.Mutex
-	registrations                 []metric.Registration
-	PostgresqlTopQueryCacheEvents metric.Int64Counter
+	meter                            metric.Meter
+	mu                               sync.Mutex
+	registrations                    []metric.Registration
+	PostgresqlQueryObfuscationFailed metric.Int64Counter
+	PostgresqlTopQueryCacheEvents    metric.Int64Counter
 }
 
 // TelemetryBuilderOption applies changes to default builder.
@@ -57,6 +58,12 @@ func NewTelemetryBuilder(settings component.TelemetrySettings, options ...Teleme
 	}
 	builder.meter = Meter(settings)
 	var err, errs error
+	builder.PostgresqlQueryObfuscationFailed, err = builder.meter.Int64Counter(
+		"otelcol_postgresql.query.obfuscation.failed",
+		metric.WithDescription("Number of statements whose text failed obfuscation, by event. The record then carries an empty db.query.text, and the statement text is never logged. [Development]"),
+		metric.WithUnit("{statement}"),
+	)
+	errs = errors.Join(errs, err)
 	builder.PostgresqlTopQueryCacheEvents, err = builder.meter.Int64Counter(
 		"otelcol_postgresql.top_query.cache.events",
 		metric.WithDescription("Number of statements handled by the top_query delta cache without reporting a true interval delta, by outcome. Seeded and duplicated statements report a zero delta for the interval; an evicted statement is seeded again on its next scrape. [Development]"),

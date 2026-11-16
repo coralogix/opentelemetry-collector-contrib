@@ -21,6 +21,22 @@ func NewSettings(tt *componenttest.Telemetry) receiver.Settings {
 	return set
 }
 
+func AssertEqualPostgresqlQueryObfuscationFailed(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...metricdatatest.Option) {
+	want := metricdata.Metrics{
+		Name:        "otelcol_postgresql.query.obfuscation.failed",
+		Description: "Number of statements whose text failed obfuscation, by event. The record then carries an empty db.query.text, and the statement text is never logged. [Development]",
+		Unit:        "{statement}",
+		Data: metricdata.Sum[int64]{
+			Temporality: metricdata.CumulativeTemporality,
+			IsMonotonic: true,
+			DataPoints:  dps,
+		},
+	}
+	got, err := tt.GetMetric("otelcol_postgresql.query.obfuscation.failed")
+	require.NoError(t, err)
+	metricdatatest.AssertEqual(t, want, got, opts...)
+}
+
 func AssertEqualPostgresqlTopQueryCacheEvents(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...metricdatatest.Option) {
 	want := metricdata.Metrics{
 		Name:        "otelcol_postgresql.top_query.cache.events",

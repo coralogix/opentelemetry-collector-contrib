@@ -367,10 +367,11 @@ func (c *postgreSQLClient) explainQuery(ctx context.Context, query, queryID stri
 	}
 
 	if repaired := repairNormalizedQuery(query); repaired != query {
+		// [DBM P7] lengths only: statement text never goes to the log.
 		logger.Debug("repaired normalized query before EXPLAIN",
 			zap.String("queryID", queryID),
-			zap.String("normalizedQuery", query),
-			zap.String("preparedQuery", repaired))
+			zap.Int("normalizedQueryLength", len(query)),
+			zap.Int("preparedQueryLength", len(repaired)))
 		query = repaired
 	}
 
@@ -378,7 +379,7 @@ func (c *postgreSQLClient) explainQuery(ctx context.Context, query, queryID stri
 
 	conn, err := c.client.Conn(ctx)
 	if err != nil {
-		logger.Error("failed to obtain a dedicated connection for EXPLAIN", zap.Error(err), zap.String("queryID", queryID))
+		logger.Error("failed to obtain a dedicated connection for EXPLAIN", append(sqlErrorFields(err), zap.String("queryID", queryID))...)
 		return "", err
 	}
 	defer conn.Close()
@@ -399,7 +400,9 @@ func (c *postgreSQLClient) explainQuery(ctx context.Context, query, queryID stri
 	prepareDb := sqlquery.NewDbClient(sqlquery.ConnWrapper{Conn: conn}, setPlanCacheMode+prepareStatement, logger, sqlquery.TelemetryConfig{})
 	if _, err = prepareDb.QueryRows(ctx); err != nil {
 		// A syntax error's character position refers to the repaired text, not the caller's.
-		logger.Error("failed to prepare statement for EXPLAIN", zap.Error(err), zap.String("queryID", queryID), zap.String("preparedQuery", query))
+		// [DBM P7] the length only, never the statement text; [DBM P7b] the
+		// SQLSTATE only, never the server message.
+		logger.Error("failed to prepare statement for EXPLAIN", append(sqlErrorFields(err), zap.String("queryID", queryID), zap.Int("queryLength", len(query)))...)
 		return "", err
 	}
 
@@ -410,7 +413,7 @@ func (c *postgreSQLClient) explainQuery(ctx context.Context, query, queryID stri
 	paramCountDb := sqlquery.NewDbClient(sqlquery.ConnWrapper{Conn: conn}, paramCountSQL, logger, sqlquery.TelemetryConfig{})
 	paramCountResult, err := paramCountDb.QueryRows(ctx)
 	if err != nil {
-		logger.Error("failed to look up prepared statement parameter count", zap.Error(err), zap.String("queryID", queryID))
+		logger.Error("failed to look up prepared statement parameter count", append(sqlErrorFields(err), zap.String("queryID", queryID))...)
 		return "", err
 	}
 	if len(paramCountResult) == 0 {
@@ -420,7 +423,7 @@ func (c *postgreSQLClient) explainQuery(ctx context.Context, query, queryID stri
 
 	paramCount, err := strconv.Atoi(paramCountResult[0]["param_count"])
 	if err != nil {
-		logger.Error("failed to parse prepared statement parameter count", zap.Error(err), zap.String("queryID", queryID))
+		logger.Error("failed to parse prepared statement parameter count", append(sqlErrorFields(err), zap.String("queryID", queryID))...)
 		return "", err
 	}
 
@@ -437,7 +440,8 @@ func (c *postgreSQLClient) explainQuery(ctx context.Context, query, queryID stri
 	explainDb := sqlquery.NewDbClient(sqlquery.ConnWrapper{Conn: conn}, explainStatement, logger, sqlquery.TelemetryConfig{})
 	result, err := explainDb.QueryRows(ctx)
 	if err != nil {
-		logger.Error("failed to explain statement", zap.Error(err))
+		// [DBM P7b] the SQLSTATE only, never the server message.
+		logger.Error("failed to explain statement", append(sqlErrorFields(err), zap.String("queryID", queryID))...)
 		return "", err
 	}
 
@@ -447,7 +451,8 @@ func (c *postgreSQLClient) explainQuery(ctx context.Context, query, queryID stri
 
 	plan, err := obfuscateSQLExecPlan(result[0]["QUERY PLAN"])
 	if err != nil {
-		logger.Error("failed to obfuscate explain plan", zap.Error(err), zap.String("queryID", queryID))
+		// [DBM P7b] a fixed reason, never the obfuscator's error text.
+		logger.Error("failed to obfuscate explain plan", zap.String("queryID", queryID), zap.String("reason", obfuscationFailureReason(err)))
 		return "", err
 	}
 
@@ -1627,10 +1632,16 @@ func (c *postgreSQLClient) getQuerySamples(ctx context.Context, limit int64, new
 			}
 		}
 
-		// TODO: check if the query is truncated.
+		// [DBM P7] pg_stat_activity cuts the text at track_activity_query_size;
+		// mark it so the server never treats it as complete.
+		queryOctetLength, _ := strconv.ParseInt(row[querySampleColumnQueryOctetLength], 10, 64)
+		trackActivityQuerySize, _ := strconv.ParseInt(row[querySampleColumnTrackActivityQuerySize], 10, 64)
+		currentAttributes[querySampleTextTruncatedKey] = querySampleTextTruncated(row[querySampleColumnQuery], queryOctetLength, trackActivityQuerySize)
 		obfuscated, err := obfuscateSQL(row[querySampleColumnQuery])
 		if err != nil {
-			logger.Warn("failed to obfuscate query", zap.String("query", row[querySampleColumnQuery]))
+			// [DBM P7] never log the statement text.
+			logObfuscationFailure(logger, metadata.AttributeEventQuerySample, row[querySampleColumnQueryID], len(row[querySampleColumnQuery]), err)
+			currentAttributes[obfuscationFailedKey] = true
 			obfuscated = ""
 		}
 		currentAttributes[dbAttributePrefix+querySampleColumnPID] = pid
@@ -1822,7 +1833,9 @@ func (c *postgreSQLClient) getTopQuery(ctx context.Context, limit int64, exclude
 				// Raw query is already stored separately for EXPLAIN
 				val, err = obfuscateSQL(row[col])
 				if err != nil {
-					logger.Error("failed to obfuscate query", zap.String("query", row[col]))
+					// [DBM P7] never log the statement text.
+					logObfuscationFailure(logger, metadata.AttributeEventTopQuery, row[queryidColumnName], len(row[col]), err)
+					currentAttributes[obfuscationFailedKey] = true
 					val = ""
 				}
 			default:

@@ -77,6 +77,9 @@ type postgreSQLScraper struct {
 	// each db.server.query_sample record. Filled only when
 	// dbm.allow_literal_capture is true. [DBM P5]
 	querySampleRawText []string
+	// querySampleTruncated holds, in recording order, whether the statement
+	// text of each db.server.query_sample record is truncated. [DBM P7]
+	querySampleTruncated []bool
 	// capabilitiesProbedAt is when a negative or failed capability probe last ran;
 	// the zero time forces a probe on the next scrape.
 	capabilitiesProbedAt time.Time
@@ -343,6 +346,9 @@ func (p *postgreSQLScraper) scrapeQuerySamples(ctx context.Context, maxRowsPerQu
 	if p.config.DBM.AllowLiteralCapture {
 		applyQuerySampleRawText(logs, rawText, p.logger)
 	}
+	truncated := p.querySampleTruncated
+	p.querySampleTruncated = nil
+	applyQuerySampleTruncated(logs, truncated, p.logger)
 	return logs, nil
 }
 
@@ -433,6 +439,7 @@ func (p *postgreSQLScraper) collectQuerySamples(ctx context.Context, dbClient cl
 
 	attributes, newestQueryTimestamp, err := dbClient.getQuerySamples(ctx, limit, p.newestQueryTimestamp, p.excludedDatabases, logger)
 	p.newestQueryTimestamp = newestQueryTimestamp
+	p.recordObfuscationFailures(ctx, attributes, metadata.AttributeEventQuerySample)
 	if err != nil {
 		mux.addPartial(err)
 		return
@@ -448,6 +455,8 @@ func (p *postgreSQLScraper) collectQuerySamples(ctx context.Context, dbClient cl
 		if p.config.DBM.AllowLiteralCapture {
 			p.querySampleRawText = append(p.querySampleRawText, attrString(atts, querySampleRawTextKey))
 		}
+		truncated, _ := atts[querySampleTextTruncatedKey].(bool)
+		p.querySampleTruncated = append(p.querySampleTruncated, truncated)
 		p.lb.RecordDbServerQuerySampleEvent(
 			logCtx,
 			timestamp,
@@ -500,6 +509,7 @@ func (p *postgreSQLScraper) collectTopQuery(ctx context.Context, clientFactory p
 
 	cumulative := p.config.TopQueryCollection.Temporality == TopQueryTemporalityCumulative
 	rows, err := defaultDbClient.getTopQuery(ctx, limit, p.excludedDatabases, p.toplevelSupported, cumulative && p.statsSinceSupported, p.config.TopQueryCollection.CandidateOrder, logger)
+	p.recordObfuscationFailures(ctx, rows, metadata.AttributeEventTopQuery)
 	if err != nil {
 		if isUndefinedColumn(err) || isUndefinedTable(err) {
 			p.invalidateStatStatementsCapabilities(logger, err)
@@ -550,7 +560,8 @@ func (p *postgreSQLScraper) collectTopQuery(ctx context.Context, clientFactory p
 
 		if queryID == nil {
 			// this should not happen, but in case
-			logger.Error("queryid is nil", zap.Any("atts", row))
+			// [DBM P7] the row holds the statement text; never log it.
+			logger.Error("queryid is nil")
 			mux.addPartial(errors.New("queryid is nil"))
 			continue
 		}
@@ -724,7 +735,9 @@ func (p *postgreSQLScraper) collectTopQuery(ctx context.Context, clientFactory p
 			if err == nil {
 				plan, err = dbClient.explainQuery(ctx, rawQuery, queryID, logger)
 				if err != nil {
-					logger.Error("failed to explain query", zap.String("query", rawQuery), zap.Error(err))
+					// [DBM P7] the length only, never the statement text; [DBM P7b]
+					// the SQLSTATE only, never the server message.
+					logger.Error("failed to explain query", append([]zap.Field{zap.String("queryID", queryID), zap.Int("queryLength", len(rawQuery))}, sqlErrorFields(err)...)...)
 				}
 				// to avoid flood the error message. there are some internal queries meant to not be
 				// explained. we wait for the cache to expire and report the error again.

@@ -759,6 +759,20 @@ top query
 
 The following telemetry is emitted by this component.
 
+### otelcol_postgresql.query.obfuscation.failed
+
+Number of statements whose text failed obfuscation, by event. The record then carries an empty db.query.text, and the statement text is never logged.
+
+| Unit | Metric Type | Value Type | Monotonic | Stability |
+| ---- | ----------- | ---------- | --------- | --------- |
+| {statement} | Sum | Int | true | Development |
+
+#### Attributes
+
+| Name | Description | Values | Semantic Convention |
+| ---- | ----------- | ------ | ------------------- |
+| event | The log event whose statement text failed obfuscation. | Str: ``query_sample``, ``top_query`` | - |
+
 ### otelcol_postgresql.top_query.cache.events
 
 Number of statements handled by the top_query delta cache without reporting a true interval delta, by outcome. Seeded and duplicated statements report a zero delta for the interval; an evicted statement is seeded again on its next scrape.
