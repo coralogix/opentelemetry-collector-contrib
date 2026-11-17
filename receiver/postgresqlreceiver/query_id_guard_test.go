@@ -7,6 +7,7 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -73,6 +74,15 @@ func TestIsCanonicalQueryID(t *testing.T) {
 		{"1_000", false},
 		{"abc-def-123", false},
 		{"-", false},
+		// [P7c review] Unicode digits are not ASCII digits.
+		{"\uff14\uff12", false},         // fullwidth "42"
+		{"\u0664\u0662", false},         // Arabic-Indic "42"
+		{"4\u0662", false},              // mixed
+		{"\U0001D7DC\U0001D7DA", false}, // mathematical double-struck "42"
+		// [P7c review] very long values.
+		{strings.Repeat("9", 4096), false},
+		{"1" + strings.Repeat("0", 4096), false},
+		{"1" + strings.Repeat("0", 18), true},
 		{p7cForged, false},
 	} {
 		t.Run(fmt.Sprintf("%q", tc.in), func(t *testing.T) {
@@ -234,7 +244,8 @@ func TestTopQueryInvalidQueryIDRowDropped(t *testing.T) {
 	assertNoForgedQueryID(t, observed)
 	entries := observed.FilterMessage("queryid is not a canonical int64; top query row dropped").AllUntimed()
 	require.Len(t, entries, 2)
-	assert.Equal(t, zapcore.ErrorLevel, entries[0].Level)
+	assert.Equal(t, zapcore.WarnLevel, entries[0].Level, "a repeated forged queryid must not flood the Error level")
+	assert.Equal(t, zapcore.WarnLevel, entries[1].Level)
 	assert.Equal(t, map[string]any{"event": "top_query", "queryIDLength": int64(len(p7cForged))}, entries[0].ContextMap())
 	assert.Equal(t, map[string]any{"event": "top_query", "queryIDLength": int64(4)}, entries[1].ContextMap())
 
@@ -267,7 +278,7 @@ func TestTopQueryNonStringQueryIDRowDropped(t *testing.T) {
 	assert.Empty(t, kept)
 	entries := observed.FilterMessage("queryid is not a canonical int64; top query row dropped").AllUntimed()
 	require.Len(t, entries, 1)
-	assert.Equal(t, map[string]any{"event": "top_query", "queryIDLength": int64(0)}, entries[0].ContextMap())
+	assert.Equal(t, map[string]any{"event": "top_query", "queryIDLength": int64(0), "queryIDType": "int64"}, entries[0].ContextMap())
 }
 
 // TestQuerySampleInvalidQueryIDCounted: the scrape counts the dropped
@@ -343,16 +354,19 @@ func TestRecordInvalidQueryIDsStripsMarker(t *testing.T) {
 
 // TestExplainQueryRefusesInvalidQueryID: the queryid becomes part of the
 // PREPARE / EXECUTE / DEALLOCATE identifier otel_<id>, so a non-canonical one
-// is refused before any SQL runs (sqlmock fails any statement it does not
-// expect, and none is expected).
+// is refused before any SQL runs and before a connection is taken: the
+// database is closed first, so any Conn or statement would fail with
+// "sql: database is closed" instead of errInvalidQueryID.
 func TestExplainQueryRefusesInvalidQueryID(t *testing.T) {
-	for _, id := range []string{p7cForged, "abc-def-123", "1; DROP TABLE x", "042", ""} {
+	for _, id := range []string{p7cForged, "abc-def-123", "1; SELECT 2", "042", ""} {
 		t.Run(fmt.Sprintf("%q", id), func(t *testing.T) {
 			db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual))
 			require.NoError(t, err)
 			t.Cleanup(func() { db.Close() })
 			core, observed := observer.New(zapcore.DebugLevel)
 			client := &postgreSQLClient{client: db, closeFn: func() error { return nil }}
+			mock.ExpectClose()
+			require.NoError(t, db.Close())
 
 			plan, err := client.explainQuery(t.Context(), p7Explainable, id, zap.New(core))
 			require.ErrorIs(t, err, errInvalidQueryID)
@@ -362,6 +376,7 @@ func TestExplainQueryRefusesInvalidQueryID(t *testing.T) {
 			assertNoForgedQueryID(t, observed)
 			entries := observed.FilterMessage("refusing EXPLAIN: queryid is not a canonical int64").AllUntimed()
 			require.Len(t, entries, 1)
+			assert.Equal(t, zapcore.WarnLevel, entries[0].Level, "a repeated forged queryid must not flood the Error level")
 			assert.Equal(t, map[string]any{"queryIDInvalid": true, "queryIDLength": int64(len(id))}, entries[0].ContextMap())
 			assert.NotContains(t, err.Error(), p7Literal)
 		})
