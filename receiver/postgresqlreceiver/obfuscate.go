@@ -172,16 +172,19 @@ var defaultSQLPlanObfuscateSettings = obfuscate.JSONConfig{
 	ObfuscateSQLValues: defaultSQLPlanNormalizeSettings.ObfuscateSQLValues,
 }
 
+// obfuscatorSQLConfig is the statement obfuscator configuration.
+var obfuscatorSQLConfig = obfuscate.SQLConfig{
+	DBMS:         "postgresql",
+	KeepSQLAlias: true,
+	KeepBoolean:  true,
+	KeepNull:     true,
+}
+
 // lazyInitObfuscator initializes the obfuscator the first time it is used.
 func lazyInitObfuscator() *obfuscate.Obfuscator {
 	obfuscatorLoader.Do(func() {
 		obfuscator = obfuscate.NewObfuscator(obfuscate.Config{
-			SQL: obfuscate.SQLConfig{
-				DBMS:         "postgresql",
-				KeepSQLAlias: true,
-				KeepBoolean:  true,
-				KeepNull:     true,
-			},
+			SQL:                  obfuscatorSQLConfig,
 			SQLExecPlan:          defaultSQLPlanObfuscateSettings,
 			SQLExecPlanNormalize: defaultSQLPlanNormalizeSettings,
 		})
