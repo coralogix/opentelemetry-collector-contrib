@@ -1,0 +1,21 @@
+receiver/postgresqlreceiver/README.md
+  s_f831f252c737d7::t_4e08b9e3a1bb8a 182-190
+.chloggen/postgresqlreceiver-queryid-numeric-guard.yaml
+  s_f831f252c737d7::t_dd52d30a70eda4 1-22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "def0e39e4b9798b68086158a46a2dbfb67afabf3",
+  "prompts": {},
+  "sessions": {
+    "s_f831f252c737d7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1d17d887-0e27-40f9-aede-50f0536246af",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "oded-dd <oded@coralogix.com>"
+    }
+  }
+}
