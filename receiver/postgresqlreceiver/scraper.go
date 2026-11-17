@@ -440,6 +440,7 @@ func (p *postgreSQLScraper) collectQuerySamples(ctx context.Context, dbClient cl
 	attributes, newestQueryTimestamp, err := dbClient.getQuerySamples(ctx, limit, p.newestQueryTimestamp, p.excludedDatabases, logger)
 	p.newestQueryTimestamp = newestQueryTimestamp
 	p.recordObfuscationFailures(ctx, attributes, metadata.AttributeEventQuerySample)
+	p.recordInvalidQueryIDs(ctx, attributes, metadata.AttributeEventQuerySample) // [DBM P7c]
 	if err != nil {
 		mux.addPartial(err)
 		return
@@ -518,6 +519,8 @@ func (p *postgreSQLScraper) collectTopQuery(ctx context.Context, clientFactory p
 		mux.addPartial(err)
 		return
 	}
+	// [DBM P7c] only rows with a canonical int64 queryid go on.
+	rows = p.dropInvalidTopQueryIDs(ctx, rows, logger)
 
 	type updatedOnlyInfo struct {
 		finalConverter func(float64) any

@@ -69,7 +69,7 @@ func logObfuscationFailure(logger *zap.Logger, event metadata.AttributeEvent, qu
 	fields := []zap.Field{
 		zap.String("event", event.String()),
 		zap.String("reason", obfuscationFailureReason(err)),
-		zap.String("queryID", queryID),
+		queryIDField(queryID), // [DBM P7c]
 		zap.Int("queryLength", textLength),
 	}
 	if event == metadata.AttributeEventTopQuery {
