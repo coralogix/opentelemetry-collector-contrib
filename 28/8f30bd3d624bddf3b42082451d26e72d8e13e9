@@ -1,0 +1,19 @@
+receiver/postgresqlreceiver/query_id_guard_test.go
+  s_f831f252c737d7::t_529f4f69eb845a 346-347
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "288f30bd3d624bddf3b42082451d26e72d8e13e9",
+  "prompts": {},
+  "sessions": {
+    "s_f831f252c737d7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1d17d887-0e27-40f9-aede-50f0536246af",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "oded-dd <oded@coralogix.com>"
+    }
+  }
+}
