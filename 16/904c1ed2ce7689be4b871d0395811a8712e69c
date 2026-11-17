@@ -1,0 +1,20 @@
+receiver/postgresqlreceiver/p7c_mutation_probe_test.go
+  s_f831f252c737d7::t_7b22ea5827eba1 33
+  s_f831f252c737d7::t_583ec2694172f5 1-32,34-124
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "16904c1ed2ce7689be4b871d0395811a8712e69c",
+  "prompts": {},
+  "sessions": {
+    "s_f831f252c737d7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1d17d887-0e27-40f9-aede-50f0536246af",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "oded-dd <oded@coralogix.com>"
+    }
+  }
+}
