@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -657,7 +658,8 @@ func explainQueryParamCountTest(pgVersion string) func(*testing.T) {
 					t.Skipf("requires PostgreSQL %d or later", tc.minMajor)
 				}
 
-				plan, err := client.explainQuery(t.Context(), tc.query, fmt.Sprintf("paramcount%d", i), logger)
+				// [DBM P7c] explainQuery accepts canonical int64 queryids only.
+				plan, err := client.explainQuery(t.Context(), tc.query, strconv.Itoa(7000+i), logger)
 				require.NoError(t, err)
 				require.NotEmpty(t, plan)
 				require.Contains(t, plan, tc.wantPlanContains)

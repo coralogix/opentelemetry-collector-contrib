@@ -26,6 +26,7 @@ type TelemetryBuilder struct {
 	mu                               sync.Mutex
 	registrations                    []metric.Registration
 	PostgresqlQueryObfuscationFailed metric.Int64Counter
+	PostgresqlQueryIDInvalid         metric.Int64Counter
 	PostgresqlTopQueryCacheEvents    metric.Int64Counter
 }
 
@@ -61,6 +62,12 @@ func NewTelemetryBuilder(settings component.TelemetrySettings, options ...Teleme
 	builder.PostgresqlQueryObfuscationFailed, err = builder.meter.Int64Counter(
 		"otelcol_postgresql.query.obfuscation.failed",
 		metric.WithDescription("Number of statements whose text failed obfuscation, by event. The record then carries an empty db.query.text, and the statement text is never logged. [Development]"),
+		metric.WithUnit("{statement}"),
+	)
+	errs = errors.Join(errs, err)
+	builder.PostgresqlQueryIDInvalid, err = builder.meter.Int64Counter(
+		"otelcol_postgresql.query_id.invalid",
+		metric.WithDescription("Number of queryid values that were not a canonical int64 and were dropped, by event. A query sample is still emitted without its query_id; a top query row is dropped. The value is never logged. [Development]"),
 		metric.WithUnit("{statement}"),
 	)
 	errs = errors.Join(errs, err)

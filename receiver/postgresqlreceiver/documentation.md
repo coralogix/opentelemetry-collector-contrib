@@ -771,7 +771,21 @@ Number of statements whose text failed obfuscation, by event. The record then ca
 
 | Name | Description | Values | Semantic Convention |
 | ---- | ----------- | ------ | ------------------- |
-| event | The log event whose statement text failed obfuscation. | Str: ``query_sample``, ``top_query`` | - |
+| event | The log event the count refers to (a query sample or a top query). | Str: ``query_sample``, ``top_query`` | - |
+
+### otelcol_postgresql.query_id.invalid
+
+Number of queryid values that were not a canonical int64 and were dropped, by event. A query sample is still emitted without its query_id; a top query row is dropped. The value is never logged.
+
+| Unit | Metric Type | Value Type | Monotonic | Stability |
+| ---- | ----------- | ---------- | --------- | --------- |
+| {statement} | Sum | Int | true | Development |
+
+#### Attributes
+
+| Name | Description | Values | Semantic Convention |
+| ---- | ----------- | ------ | ------------------- |
+| event | The log event the count refers to (a query sample or a top query). | Str: ``query_sample``, ``top_query`` | - |
 
 ### otelcol_postgresql.top_query.cache.events
 
