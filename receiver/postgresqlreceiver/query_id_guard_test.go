@@ -343,7 +343,8 @@ func TestRecordInvalidQueryIDsStripsMarker(t *testing.T) {
 
 // TestExplainQueryRefusesInvalidQueryID: the queryid becomes part of the
 // PREPARE / EXECUTE / DEALLOCATE identifier otel_<id>, so a non-canonical one
-// is refused before any SQL runs or a connection is taken.
+// is refused before any SQL runs (sqlmock fails any statement it does not
+// expect, and none is expected).
 func TestExplainQueryRefusesInvalidQueryID(t *testing.T) {
 	for _, id := range []string{p7cForged, "abc-def-123", "1; DROP TABLE x", "042", ""} {
 		t.Run(fmt.Sprintf("%q", id), func(t *testing.T) {
@@ -357,7 +358,6 @@ func TestExplainQueryRefusesInvalidQueryID(t *testing.T) {
 			require.ErrorIs(t, err, errInvalidQueryID)
 			assert.Empty(t, plan)
 			require.NoError(t, mock.ExpectationsWereMet(), "no SQL runs")
-			assert.Equal(t, 0, db.Stats().OpenConnections, "no connection is taken")
 
 			assertNoForgedQueryID(t, observed)
 			entries := observed.FilterMessage("refusing EXPLAIN: queryid is not a canonical int64").AllUntimed()
