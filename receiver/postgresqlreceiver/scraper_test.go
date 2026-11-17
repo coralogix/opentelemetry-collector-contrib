@@ -2033,10 +2033,12 @@ func TestExplainQuery(t *testing.T) {
 			mockPlanResult:    `[{"Plan":{"Node Type":"Index Scan","Relation Name":"orders"}}]`,
 		},
 		{
+			// [DBM P7c] a negative queryid is the only one with a hyphen;
+			// a non-canonical one is refused (TestExplainQueryRefusesInvalidQueryID).
 			name:              "query with hyphenated queryID",
 			query:             "SELECT * FROM products WHERE id = $1",
-			queryID:           "abc-def-123",
-			normalizedQueryID: "abc_def_123",
+			queryID:           "-123",
+			normalizedQueryID: "_123",
 			paramCount:        1,
 			mockPlanResult:    `[{"Plan":{"Node Type":"Index Scan","Relation Name":"products"}}]`,
 		},

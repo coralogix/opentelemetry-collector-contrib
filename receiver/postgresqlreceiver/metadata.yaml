@@ -134,7 +134,7 @@ attributes:
     type: string
     enum: [postgresql]
   event:
-    description: The log event whose statement text failed obfuscation.
+    description: The log event the count refers to (a query sample or a top query).
     type: string
     enum:
       - query_sample
@@ -825,6 +825,15 @@ telemetry:
     postgresql.query.obfuscation.failed:
       enabled: true
       description: Number of statements whose text failed obfuscation, by event. The record then carries an empty db.query.text, and the statement text is never logged.
+      stability: development
+      unit: "{statement}"
+      attributes: [event]
+      sum:
+        value_type: int
+        monotonic: true
+    postgresql.query_id.invalid:
+      enabled: true
+      description: Number of queryid values that were not a canonical int64 and were dropped, by event. A query sample is still emitted without its query_id; a top query row is dropped. The value is never logged.
       stability: development
       unit: "{statement}"
       attributes: [event]

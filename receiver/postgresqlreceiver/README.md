@@ -179,6 +179,15 @@ scrape later drops (for example a top query that is only seeded into the delta c
 discarded because of a conversion error). On the EXPLAIN path, database errors are logged by SQLSTATE
 (`sqlState`, `errorCategory`) only, never by their message, which can quote a value of the statement.
 
+#### Query id check
+
+A query id (`pg_stat_statements.queryid`, `pg_stat_activity.query_id`) is a `bigint`. The receiver
+accepts it only in canonical signed decimal form (no `+`, no leading zeros, no spaces). Any other value
+is dropped and never logged: a query sample is still emitted with an empty `postgresql.query_id`; a top
+query row is dropped (no record, no plan). The receiver logs the event and the value's length, and the
+internal counter `otelcol_postgresql.query_id.invalid` (attribute `event`) counts the drops. An empty
+`query_id` (for example with `compute_query_id = off`) is not counted.
+
 #### Raw query text (`dbm.allow_literal_capture`)
 
 - `dbm.allow_literal_capture`: (optional, default=`false`) When `true`, each `db.server.query_sample`

@@ -360,6 +360,14 @@ func isIdentifierByte(b byte) bool {
 // DEALLOCATE) has to run on the one connection that ran PREPARE, not just whatever the pool
 // hands out for each call.
 func (c *postgreSQLClient) explainQuery(ctx context.Context, query, queryID string, logger *zap.Logger) (string, error) {
+	// [DBM P7c] the queryid becomes the otel_<id> identifier of PREPARE,
+	// EXECUTE and DEALLOCATE: only a canonical int64 may get there.
+	if !isCanonicalQueryID(queryID) {
+		// Warn, not Error: a forged queryid repeats on every scrape; the
+		// counter and this line carry no value.
+		logger.Warn("refusing EXPLAIN: queryid is not a canonical int64", zap.Bool("queryIDInvalid", true), zap.Int("queryIDLength", len(queryID)))
+		return "", errInvalidQueryID
+	}
 	// Check if the query is explainable before attempting EXPLAIN
 	if !isExplainableQuery(query) {
 		logger.Debug("skipping EXPLAIN for non-explainable query", zap.String("queryID", queryID))
@@ -1588,6 +1596,18 @@ func (c *postgreSQLClient) getQuerySamples(ctx context.Context, limit int64, new
 			currentAttributes[querySampleTraceContextKey] = traceCtx
 		}
 
+		// [DBM P7c] a non-canonical query_id is forged or corrupted: drop it,
+		// never echo it. An empty one (compute_query_id off) stays.
+		queryID := row[querySampleColumnQueryID]
+		if queryID != "" && !isCanonicalQueryID(queryID) {
+			logger.Warn("query_id is not a canonical int64; dropped",
+				zap.String("event", metadata.AttributeEventQuerySample.String()),
+				zap.Int("queryIDLength", len(queryID)))
+			queryID = ""
+			currentAttributes[dbAttributePrefix+querySampleColumnQueryID] = ""
+			currentAttributes[queryIDInvalidKey] = true
+		}
+
 		clientPort := int64(0)
 		if row[querySampleColumnClientPort] != "" {
 			clientPort, err = strconv.ParseInt(row[querySampleColumnClientPort], 10, 64)
@@ -1640,7 +1660,7 @@ func (c *postgreSQLClient) getQuerySamples(ctx context.Context, limit int64, new
 		obfuscated, err := obfuscateSQL(row[querySampleColumnQuery])
 		if err != nil {
 			// [DBM P7] never log the statement text.
-			logObfuscationFailure(logger, metadata.AttributeEventQuerySample, row[querySampleColumnQueryID], len(row[querySampleColumnQuery]), err)
+			logObfuscationFailure(logger, metadata.AttributeEventQuerySample, queryID, len(row[querySampleColumnQuery]), err)
 			currentAttributes[obfuscationFailedKey] = true
 			obfuscated = ""
 		}

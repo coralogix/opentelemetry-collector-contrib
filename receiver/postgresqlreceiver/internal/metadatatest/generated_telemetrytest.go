@@ -37,6 +37,22 @@ func AssertEqualPostgresqlQueryObfuscationFailed(t *testing.T, tt *componenttest
 	metricdatatest.AssertEqual(t, want, got, opts...)
 }
 
+func AssertEqualPostgresqlQueryIDInvalid(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...metricdatatest.Option) {
+	want := metricdata.Metrics{
+		Name:        "otelcol_postgresql.query_id.invalid",
+		Description: "Number of queryid values that were not a canonical int64 and were dropped, by event. A query sample is still emitted without its query_id; a top query row is dropped. The value is never logged. [Development]",
+		Unit:        "{statement}",
+		Data: metricdata.Sum[int64]{
+			Temporality: metricdata.CumulativeTemporality,
+			IsMonotonic: true,
+			DataPoints:  dps,
+		},
+	}
+	got, err := tt.GetMetric("otelcol_postgresql.query_id.invalid")
+	require.NoError(t, err)
+	metricdatatest.AssertEqual(t, want, got, opts...)
+}
+
 func AssertEqualPostgresqlTopQueryCacheEvents(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...metricdatatest.Option) {
 	want := metricdata.Metrics{
 		Name:        "otelcol_postgresql.top_query.cache.events",

@@ -20,8 +20,12 @@ func TestSetupTelemetry(t *testing.T) {
 	require.NoError(t, err)
 	defer tb.Shutdown()
 	tb.PostgresqlQueryObfuscationFailed.Add(context.Background(), 1)
+	tb.PostgresqlQueryIDInvalid.Add(context.Background(), 1)
 	tb.PostgresqlTopQueryCacheEvents.Add(context.Background(), 1)
 	AssertEqualPostgresqlQueryObfuscationFailed(t, testTel,
+		[]metricdata.DataPoint[int64]{{Value: 1}},
+		metricdatatest.IgnoreTimestamp())
+	AssertEqualPostgresqlQueryIDInvalid(t, testTel,
 		[]metricdata.DataPoint[int64]{{Value: 1}},
 		metricdatatest.IgnoreTimestamp())
 	AssertEqualPostgresqlTopQueryCacheEvents(t, testTel,
