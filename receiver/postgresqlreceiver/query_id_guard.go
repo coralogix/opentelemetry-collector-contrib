@@ -6,6 +6,7 @@ package postgresqlreceiver // import "github.com/open-telemetry/opentelemetry-co
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -65,14 +66,22 @@ func (p *postgreSQLScraper) dropInvalidTopQueryIDs(ctx context.Context, rows []m
 			kept = append(kept, row)
 			continue
 		}
-		queryID, _ := value.(string)
-		if isCanonicalQueryID(queryID) {
+		queryID, isString := value.(string)
+		if isString && isCanonicalQueryID(queryID) {
 			kept = append(kept, row)
 			continue
 		}
-		logger.Error("queryid is not a canonical int64; top query row dropped",
+		fields := []zap.Field{
 			zap.String("event", metadata.AttributeEventTopQuery.String()),
-			zap.Int("queryIDLength", len(queryID)))
+			zap.Int("queryIDLength", len(queryID)),
+		}
+		if !isString {
+			fields = append(fields, zap.String("queryIDType", fmt.Sprintf("%T", value)))
+		}
+		// Warn, not Error: a forged queryid repeats on every scrape (one line
+		// per row, bounded by the top query limit); the counter is the
+		// alerting signal.
+		logger.Warn("queryid is not a canonical int64; top query row dropped", fields...)
 		n++
 	}
 	p.countInvalidQueryIDs(ctx, n, metadata.AttributeEventTopQuery)

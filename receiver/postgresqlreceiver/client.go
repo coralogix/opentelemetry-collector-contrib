@@ -363,7 +363,9 @@ func (c *postgreSQLClient) explainQuery(ctx context.Context, query, queryID stri
 	// [DBM P7c] the queryid becomes the otel_<id> identifier of PREPARE,
 	// EXECUTE and DEALLOCATE: only a canonical int64 may get there.
 	if !isCanonicalQueryID(queryID) {
-		logger.Error("refusing EXPLAIN: queryid is not a canonical int64", zap.Bool("queryIDInvalid", true), zap.Int("queryIDLength", len(queryID)))
+		// Warn, not Error: a forged queryid repeats on every scrape; the
+		// counter and this line carry no value.
+		logger.Warn("refusing EXPLAIN: queryid is not a canonical int64", zap.Bool("queryIDInvalid", true), zap.Int("queryIDLength", len(queryID)))
 		return "", errInvalidQueryID
 	}
 	// Check if the query is explainable before attempting EXPLAIN
