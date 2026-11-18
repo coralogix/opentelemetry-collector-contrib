@@ -40,6 +40,19 @@ type Config struct {
 
 	// MetricsBuilderConfig allows customizing scraped metrics/attributes representation.
 	MetricsBuilderConfig metadata.MetricsBuilderConfig `mapstructure:",squash"`
+
+	// MetadataCollectionInterval is how often the logs pipeline reports cluster, broker, topic and group entities.
+	MetadataCollectionInterval time.Duration `mapstructure:"metadata_collection_interval"`
+
+	// EntityConfigs controls which Kafka settings are attached to the reported entities.
+	EntityConfigs EntityConfigsConfig `mapstructure:"entity_configs"`
+}
+
+// EntityConfigsConfig controls the Kafka settings attached to entities.
+type EntityConfigsConfig struct {
+	Enabled bool `mapstructure:"enabled"`
+	// IncludeDefaults also attaches settings left at Kafka's default, not only the curated ones.
+	IncludeDefaults bool `mapstructure:"include_defaults"`
 }
 
 func (c *Config) Unmarshal(conf *confmap.Conf) error {

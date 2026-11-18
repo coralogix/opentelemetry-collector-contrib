@@ -4,9 +4,22 @@ properties:
   cluster_alias:
     description: Alias name of the kafka cluster
     type: string
+  entity_configs:
+    description: EntityConfigs controls which Kafka settings are attached to the reported entities.
+    type: object
+    properties:
+      enabled:
+        type: boolean
+      include_defaults:
+        description: IncludeDefaults also attaches settings left at Kafka's default, not only the curated ones.
+        type: boolean
   group_match:
     description: GroupMatch consumer groups to collect on
     type: string
+  metadata_collection_interval:
+    description: MetadataCollectionInterval is how often the logs pipeline reports cluster, broker, topic and group entities.
+    type: string
+    format: duration
   refresh_frequency:
     description: 'Cluster metadata refresh frequency Configures the refresh frequency to update cached cluster metadata If Metadata.RefreshInterval is set, this will be ignored. Deprecated [v0.122.0]: use Metadata.RefreshInterval instead.'
     type: string

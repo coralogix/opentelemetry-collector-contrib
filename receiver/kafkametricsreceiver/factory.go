@@ -5,6 +5,7 @@ package kafkametricsreceiver // import "github.com/open-telemetry/opentelemetry-
 
 import (
 	"context"
+	"time"
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
@@ -17,8 +18,9 @@ import (
 )
 
 const (
-	defaultGroupMatch = ".*"
-	defaultTopicMatch = "^[^_].*$"
+	defaultGroupMatch                 = ".*"
+	defaultTopicMatch                 = "^[^_].*$"
+	defaultMetadataCollectionInterval = 5 * time.Minute
 )
 
 // NewFactory creates kafkametrics receiver factory.
@@ -27,6 +29,7 @@ func NewFactory() receiver.Factory {
 		metadata.Type,
 		createDefaultConfig,
 		xreceiver.WithMetrics(createMetricsReceiver, metadata.MetricsStability),
+		xreceiver.WithLogs(createLogsReceiver, metadata.LogsStability),
 		xreceiver.WithDeprecatedTypeAlias(metadata.DeprecatedType),
 	)
 }
@@ -38,7 +41,19 @@ func createDefaultConfig() component.Config {
 		GroupMatch:           defaultGroupMatch,
 		TopicMatch:           defaultTopicMatch,
 		MetricsBuilderConfig: metadata.NewDefaultMetricsBuilderConfig(),
+
+		MetadataCollectionInterval: defaultMetadataCollectionInterval,
+		EntityConfigs:              EntityConfigsConfig{Enabled: true},
 	}
+}
+
+func createLogsReceiver(
+	_ context.Context,
+	params receiver.Settings,
+	cfg component.Config,
+	nextConsumer consumer.Logs,
+) (receiver.Logs, error) {
+	return newEntitiesReceiver(*cfg.(*Config), params, nextConsumer)
 }
 
 func createMetricsReceiver(

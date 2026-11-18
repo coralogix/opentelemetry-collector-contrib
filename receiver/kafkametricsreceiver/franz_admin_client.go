@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/twmb/franz-go/pkg/kadm"
+	"github.com/twmb/franz-go/pkg/kgo"
 	"go.opentelemetry.io/collector/component"
 	"go.uber.org/zap"
 
@@ -26,6 +27,7 @@ type franzAdminProvider struct {
 
 	mu       sync.Mutex
 	adm      *kadm.Client
+	kcl      *kgo.Client
 	refCount int
 }
 
@@ -52,12 +54,23 @@ func (p *franzAdminProvider) admin(ctx context.Context, host component.Host) (*k
 	}
 	// kadm.Client wraps and owns the underlying *kgo.Client, so we only need to
 	// hold on to the admin client (its Close also closes the kgo client).
-	adm, _, err := kafka.NewFranzClusterAdminClient(ctx, host, p.clientConfig, p.logger)
+	adm, kcl, err := kafka.NewFranzClusterAdminClient(ctx, host, p.clientConfig, p.logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create franz-go admin client: %w", err)
 	}
 	p.adm = adm
+	p.kcl = kcl
 	return p.adm, nil
+}
+
+// client returns the kgo client behind the shared admin client, for requests kadm does not wrap.
+func (p *franzAdminProvider) client(ctx context.Context, host component.Host) (*kgo.Client, error) {
+	if _, err := p.admin(ctx, host); err != nil {
+		return nil, err
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.kcl, nil
 }
 
 // release drops a reference, closing the client when the last one is released.
@@ -74,5 +87,6 @@ func (p *franzAdminProvider) release() {
 		// kadm.Client.Close also closes the underlying *kgo.Client.
 		p.adm.Close()
 		p.adm = nil
+		p.kcl = nil
 	}
 }

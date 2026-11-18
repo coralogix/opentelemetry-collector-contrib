@@ -43,5 +43,8 @@ func TestLoadConfig(t *testing.T) {
 		RefreshFrequency:     time.Nanosecond,
 		Scrapers:             []string{"brokers", "topics", "consumers"},
 		MetricsBuilderConfig: metadata.NewDefaultMetricsBuilderConfig(),
+
+		MetadataCollectionInterval: defaultMetadataCollectionInterval,
+		EntityConfigs:              EntityConfigsConfig{Enabled: true},
 	}, cfg)
 }
