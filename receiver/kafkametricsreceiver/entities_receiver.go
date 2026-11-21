@@ -308,7 +308,7 @@ func (r *entitiesReceiver) groups(ctx context.Context, adm *kadm.Client, cluster
 		for _, m := range l.Members {
 			mm := members.AppendEmpty().SetEmptyMap()
 			mm.PutStr("client_id", m.ClientID)
-			mm.PutStr("host", m.ClientHost)
+			mm.PutStr("host", memberHost(m.ClientHost))
 			if a, ok := m.Assigned.AsConsumer(); ok {
 				parts := mm.PutEmptySlice("assigned")
 				for _, t := range a.Topics {
@@ -331,6 +331,11 @@ func (r *entitiesReceiver) groups(ctx context.Context, adm *kadm.Client, cluster
 		}
 	}
 	return nil
+}
+
+// memberHost drops the "/" Kafka puts in front of a member's client address ("/10.0.1.114").
+func memberHost(clientHost string) string {
+	return strings.TrimPrefix(clientHost, "/")
 }
 
 // quorum returns the active controller, the voting controllers and the metadata mode.

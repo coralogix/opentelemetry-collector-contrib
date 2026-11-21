@@ -244,3 +244,9 @@ func TestEntities_UnreachableClusterSendsNothing(t *testing.T) {
 	r.collect(ctx)
 	assert.Empty(t, sink.AllLogs())
 }
+
+func TestMemberHost_DropsTheLeadingSlash(t *testing.T) {
+	assert.Equal(t, "10.0.1.114", memberHost("/10.0.1.114"))
+	assert.Equal(t, "10.0.1.114", memberHost("10.0.1.114"))
+	assert.Empty(t, memberHost(""))
+}
