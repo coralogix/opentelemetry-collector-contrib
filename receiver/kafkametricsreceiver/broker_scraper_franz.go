@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/twmb/franz-go/pkg/kadm"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
@@ -61,8 +62,14 @@ func (s *brokerScraperFranz) scrape(ctx context.Context) (pmetric.Metrics, error
 	rb := s.mb.NewResourceBuilder()
 	rb.SetKafkaClusterAlias(s.config.ClusterAlias)
 
-	// BrokerMetadata returns the broker list and cluster ID in one topic-less request.
-	meta, err := adm.BrokerMetadata(ctx)
+	metrics := s.config.MetricsBuilderConfig.Metrics
+	// Partition leadership needs every topic; otherwise a topic-less request is enough.
+	var meta kadm.Metadata
+	if metrics.KafkaBrokerPartitionsLed.Enabled {
+		meta, err = adm.Metadata(ctx)
+	} else {
+		meta, err = adm.BrokerMetadata(ctx)
+	}
 	if err != nil {
 		scrapeErrs.Add(err)
 		return s.mb.Emit(metadata.WithResource(rb.Emit())), scrapeErrs.Combine()
@@ -73,8 +80,20 @@ func (s *brokerScraperFranz) scrape(ctx context.Context) (pmetric.Metrics, error
 	brokerIDs := meta.Brokers.NodeIDs()
 	s.mb.RecordKafkaBrokersDataPoint(now, int64(len(brokerIDs)))
 
+	if metrics.KafkaBrokerPartitionsLed.Enabled {
+		led := make(map[int32]int64, len(brokerIDs))
+		meta.Topics.EachPartition(func(pd kadm.PartitionDetail) { led[pd.Leader]++ })
+		for _, bid := range brokerIDs {
+			s.mb.RecordKafkaBrokerPartitionsLedDataPoint(now, led[bid], strconv.Itoa(int(bid)))
+		}
+	}
+
+	if metrics.KafkaBrokerLogDirsUsed.Enabled || metrics.KafkaBrokerLogDirsTotal.Enabled || metrics.KafkaBrokerLogDirsUsable.Enabled {
+		s.recordLogDirs(ctx, adm, now, &scrapeErrs)
+	}
+
 	// If log retention metric is disabled, we are done.
-	if !s.config.MetricsBuilderConfig.Metrics.KafkaBrokerLogRetentionPeriod.Enabled {
+	if !metrics.KafkaBrokerLogRetentionPeriod.Enabled {
 		return s.mb.Emit(metadata.WithResource(rb.Emit())), scrapeErrs.Combine()
 	}
 
@@ -113,6 +132,41 @@ func (s *brokerScraperFranz) scrape(ctx context.Context) (pmetric.Metrics, error
 	}
 
 	return s.mb.Emit(metadata.WithResource(rb.Emit())), scrapeErrs.Combine()
+}
+
+func (s *brokerScraperFranz) recordLogDirs(ctx context.Context, adm *kadm.Client, now pcommon.Timestamp, scrapeErrs *scrapererror.ScrapeErrors) {
+	all, err := adm.DescribeAllLogDirs(ctx, nil)
+	if err != nil {
+		s.settings.Logger.Warn("franz-go: DescribeAllLogDirs failed", zap.Error(err))
+		scrapeErrs.AddPartial(1, fmt.Errorf("DescribeAllLogDirs: %w", err))
+	}
+	for bid, dirs := range all {
+		bidStr := strconv.Itoa(int(bid))
+		var used, total, usable int64
+		dirsOK, volumesKnown := true, true
+		for _, dir := range dirs {
+			if dir.Err != nil {
+				scrapeErrs.AddPartial(1, fmt.Errorf("broker %s log dir %s: %w", bidStr, dir.Dir, dir.Err))
+				dirsOK = false
+				continue
+			}
+			used += dir.Size()
+			// Brokers before Kafka 3.3 report -1 for both.
+			if dir.TotalBytes < 0 || dir.UsableBytes < 0 {
+				volumesKnown = false
+			}
+			total += dir.TotalBytes
+			usable += dir.UsableBytes
+		}
+		if !dirsOK {
+			continue
+		}
+		s.mb.RecordKafkaBrokerLogDirsUsedDataPoint(now, used, bidStr)
+		if volumesKnown {
+			s.mb.RecordKafkaBrokerLogDirsTotalDataPoint(now, total, bidStr)
+			s.mb.RecordKafkaBrokerLogDirsUsableDataPoint(now, usable, bidStr)
+		}
+	}
 }
 
 // factory for franz-go scraper (internal; selected via gate at the call site later)

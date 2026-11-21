@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/twmb/franz-go/pkg/kerr"
 	"github.com/twmb/franz-go/pkg/kfake"
+	"github.com/twmb/franz-go/pkg/kmsg"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/receiver/receivertest"
@@ -273,4 +275,100 @@ func TestBrokerScraperFranz_ShutdownWithoutStart_OK(t *testing.T) {
 
 	// should not panic / should return nil
 	require.NoError(t, s.Shutdown(t.Context()))
+}
+
+func TestBrokerScraperFranz_PartitionsLed(t *testing.T) {
+	const topic = "topic-a"
+	cluster, clientCfg := kafkatest.NewCluster(t, kfake.SeedTopics(4, topic), kfake.NumBrokers(3))
+	for partition, leader := range []int32{0, 1, 1, 1} {
+		require.NoError(t, cluster.MoveTopicPartition(topic, int32(partition), leader))
+	}
+
+	md := scrapeBrokers(t, Config{ClientConfig: clientCfg, MetricsBuilderConfig: metadata.NewDefaultMetricsBuilderConfig()})
+
+	require.Equal(t, map[string]int64{"broker=0": 1, "broker=1": 3, "broker=2": 0}, intDataPoints(md, "kafka.broker.partitions_led"))
+}
+
+func TestBrokerScraperFranz_PartitionsLedSkipsOfflinePartitions(t *testing.T) {
+	cluster, clientCfg := kafkatest.NewCluster(t, kfake.SeedTopics(3, "topic-a"), kfake.NumBrokers(2))
+	controlMetadataLeaders(cluster, "topic-a", []int32{0, -1, 0})
+
+	md := scrapeBrokers(t, Config{ClientConfig: clientCfg, MetricsBuilderConfig: metadata.NewDefaultMetricsBuilderConfig()})
+
+	require.Equal(t, map[string]int64{"broker=0": 2, "broker=1": 0}, intDataPoints(md, "kafka.broker.partitions_led"))
+}
+
+func TestBrokerScraperFranz_LogDirs(t *testing.T) {
+	cluster, clientCfg := kafkatest.NewCluster(t, kfake.SeedTopics(3, "topic-a"), kfake.NumBrokers(2))
+	// Volume sizes are only carried by DescribeLogDirs v4+ (Kafka 3.3+).
+	clientCfg.ProtocolVersion = "3.5.0"
+	controlLogDirs(t, cluster, func(node int32, _ *kmsg.DescribeLogDirsRequest) []kmsg.DescribeLogDirsResponseDir {
+		if node == 0 {
+			return []kmsg.DescribeLogDirsResponseDir{
+				logDir("/a", 1000, 400, map[int32]int64{0: 100, 1: 50}),
+				logDir("/b", 2000, 1000, map[int32]int64{2: 25}),
+			}
+		}
+		// A broker or volume that does not report its sizes.
+		return []kmsg.DescribeLogDirsResponseDir{logDir("/a", -1, -1, map[int32]int64{0: 10})}
+	})
+
+	cfg := Config{ClientConfig: clientCfg, MetricsBuilderConfig: metadata.NewDefaultMetricsBuilderConfig()}
+	cfg.MetricsBuilderConfig.Metrics.KafkaBrokerLogDirsUsed.Enabled = true
+	cfg.MetricsBuilderConfig.Metrics.KafkaBrokerLogDirsTotal.Enabled = true
+	cfg.MetricsBuilderConfig.Metrics.KafkaBrokerLogDirsUsable.Enabled = true
+	md := scrapeBrokers(t, cfg)
+
+	require.Equal(t, map[string]int64{"broker=0": 175, "broker=1": 10}, intDataPoints(md, "kafka.broker.log_dirs.used"))
+	require.Equal(t, map[string]int64{"broker=0": 3000}, intDataPoints(md, "kafka.broker.log_dirs.total"))
+	require.Equal(t, map[string]int64{"broker=0": 1400}, intDataPoints(md, "kafka.broker.log_dirs.usable"))
+}
+
+func TestBrokerScraperFranz_LogDirsBeforeKafka33(t *testing.T) {
+	cluster, clientCfg := kafkatest.NewCluster(t, kfake.SeedTopics(1, "topic-a"), kfake.NumBrokers(1))
+	// The default test protocol version predates DescribeLogDirs v4, so set sizes never reach the client.
+	controlLogDirs(t, cluster, func(int32, *kmsg.DescribeLogDirsRequest) []kmsg.DescribeLogDirsResponseDir {
+		return []kmsg.DescribeLogDirsResponseDir{logDir("/a", 1000, 400, map[int32]int64{0: 100})}
+	})
+
+	cfg := Config{ClientConfig: clientCfg, MetricsBuilderConfig: metadata.NewDefaultMetricsBuilderConfig()}
+	cfg.MetricsBuilderConfig.Metrics.KafkaBrokerLogDirsUsed.Enabled = true
+	cfg.MetricsBuilderConfig.Metrics.KafkaBrokerLogDirsTotal.Enabled = true
+	cfg.MetricsBuilderConfig.Metrics.KafkaBrokerLogDirsUsable.Enabled = true
+	md := scrapeBrokers(t, cfg)
+
+	require.Equal(t, map[string]int64{"broker=0": 100}, intDataPoints(md, "kafka.broker.log_dirs.used"))
+	require.Empty(t, intDataPoints(md, "kafka.broker.log_dirs.total"))
+	require.Empty(t, intDataPoints(md, "kafka.broker.log_dirs.usable"))
+}
+
+func TestBrokerScraperFranz_LogDirError(t *testing.T) {
+	cluster, clientCfg := kafkatest.NewCluster(t, kfake.SeedTopics(1, "topic-a"), kfake.NumBrokers(1))
+	controlLogDirs(t, cluster, func(int32, *kmsg.DescribeLogDirsRequest) []kmsg.DescribeLogDirsResponseDir {
+		offline := logDir("/b", -1, -1, nil)
+		offline.ErrorCode = kerr.KafkaStorageError.Code
+		return []kmsg.DescribeLogDirsResponseDir{logDir("/a", -1, -1, map[int32]int64{0: 100}), offline}
+	})
+
+	cfg := Config{ClientConfig: clientCfg, MetricsBuilderConfig: metadata.NewDefaultMetricsBuilderConfig()}
+	cfg.MetricsBuilderConfig.Metrics.KafkaBrokerLogDirsUsed.Enabled = true
+	s, err := createBrokerScraperFranz(t.Context(), cfg, receivertest.NewNopSettings(metadata.Type), nil)
+	require.NoError(t, err)
+	require.NoError(t, s.Start(t.Context(), componenttest.NewNopHost()))
+	t.Cleanup(func() { require.NoError(t, s.Shutdown(t.Context())) })
+
+	md, err := s.ScrapeMetrics(t.Context())
+	require.True(t, scrapererror.IsPartialScrapeError(err), "expected partial scrape error, got %v", err)
+	require.Empty(t, intDataPoints(md, "kafka.broker.log_dirs.used"), "a partial sum must not be reported")
+}
+
+func scrapeBrokers(t *testing.T, cfg Config) pmetric.Metrics {
+	t.Helper()
+	s, err := createBrokerScraperFranz(t.Context(), cfg, receivertest.NewNopSettings(metadata.Type), nil)
+	require.NoError(t, err)
+	require.NoError(t, s.Start(t.Context(), componenttest.NewNopHost()))
+	t.Cleanup(func() { require.NoError(t, s.Shutdown(t.Context())) })
+	md, err := s.ScrapeMetrics(t.Context())
+	require.NoError(t, err)
+	return md
 }

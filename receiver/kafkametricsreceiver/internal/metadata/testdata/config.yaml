@@ -1,7 +1,19 @@
 default:
 all_set:
   metrics:
+    kafka.broker.log_dirs.total:
+      enabled: true
+      attributes: ["broker"]
+    kafka.broker.log_dirs.usable:
+      enabled: true
+      attributes: ["broker"]
+    kafka.broker.log_dirs.used:
+      enabled: true
+      attributes: ["broker"]
     kafka.broker.log_retention_period:
+      enabled: true
+      attributes: ["broker"]
+    kafka.broker.partitions_led:
       enabled: true
       attributes: ["broker"]
     kafka.brokers:
@@ -22,6 +34,12 @@ all_set:
       enabled: true
       attributes: ["group","topic"]
     kafka.partition.current_offset:
+      enabled: true
+      attributes: ["topic","partition"]
+    kafka.partition.leader_id:
+      enabled: true
+      attributes: ["topic","partition"]
+    kafka.partition.offline:
       enabled: true
       attributes: ["topic","partition"]
     kafka.partition.oldest_offset:
@@ -46,6 +64,9 @@ all_set:
       enabled: true
       attributes: ["topic"]
     kafka.topic.replication_factor:
+      enabled: true
+      attributes: ["topic"]
+    kafka.topic.size:
       enabled: true
       attributes: ["topic"]
   resource_attributes:
@@ -55,7 +76,19 @@ all_set:
       enabled: true
 reaggregate_set:
   metrics:
+    kafka.broker.log_dirs.total:
+      enabled: true
+      attributes: []
+    kafka.broker.log_dirs.usable:
+      enabled: true
+      attributes: []
+    kafka.broker.log_dirs.used:
+      enabled: true
+      attributes: []
     kafka.broker.log_retention_period:
+      enabled: true
+      attributes: []
+    kafka.broker.partitions_led:
       enabled: true
       attributes: []
     kafka.brokers:
@@ -76,6 +109,12 @@ reaggregate_set:
       enabled: true
       attributes: []
     kafka.partition.current_offset:
+      enabled: true
+      attributes: []
+    kafka.partition.leader_id:
+      enabled: true
+      attributes: []
+    kafka.partition.offline:
       enabled: true
       attributes: []
     kafka.partition.oldest_offset:
@@ -102,6 +141,9 @@ reaggregate_set:
     kafka.topic.replication_factor:
       enabled: true
       attributes: []
+    kafka.topic.size:
+      enabled: true
+      attributes: []
   resource_attributes:
     kafka.cluster.alias:
       enabled: true
@@ -109,7 +151,19 @@ reaggregate_set:
       enabled: true
 none_set:
   metrics:
+    kafka.broker.log_dirs.total:
+      enabled: false
+      attributes: ["broker"]
+    kafka.broker.log_dirs.usable:
+      enabled: false
+      attributes: ["broker"]
+    kafka.broker.log_dirs.used:
+      enabled: false
+      attributes: ["broker"]
     kafka.broker.log_retention_period:
+      enabled: false
+      attributes: ["broker"]
+    kafka.broker.partitions_led:
       enabled: false
       attributes: ["broker"]
     kafka.brokers:
@@ -132,6 +186,12 @@ none_set:
     kafka.partition.current_offset:
       enabled: false
       attributes: ["topic","partition"]
+    kafka.partition.leader_id:
+      enabled: false
+      attributes: ["topic","partition"]
+    kafka.partition.offline:
+      enabled: false
+      attributes: ["topic","partition"]
     kafka.partition.oldest_offset:
       enabled: false
       attributes: ["topic","partition"]
@@ -154,6 +214,9 @@ none_set:
       enabled: false
       attributes: ["topic"]
     kafka.topic.replication_factor:
+      enabled: false
+      attributes: ["topic"]
+    kafka.topic.size:
       enabled: false
       attributes: ["topic"]
   resource_attributes:

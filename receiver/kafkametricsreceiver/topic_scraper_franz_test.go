@@ -5,12 +5,18 @@ package kafkametricsreceiver
 
 import (
 	"context"
+	"net"
 	"regexp"
+	"sort"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/twmb/franz-go/pkg/kerr"
 	"github.com/twmb/franz-go/pkg/kfake"
+	"github.com/twmb/franz-go/pkg/kmsg"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/receiver/receivertest"
@@ -307,4 +313,222 @@ func TestTopicScraperFranz_ScrapeUnreachable(t *testing.T) {
 func TestTopicScraperFranz_FilterCompilesLikeSarama(t *testing.T) {
 	r := regexp.MustCompile(defaultTopicMatch)
 	require.NotNil(t, r)
+}
+
+func TestTopicScraperFranz_PartitionLeaders(t *testing.T) {
+	const topic = "topic-a"
+	cluster, clientCfg := kafkatest.NewCluster(t, kfake.SeedTopics(3, topic), kfake.NumBrokers(3))
+	for partition, leader := range []int32{0, 2, 2} {
+		require.NoError(t, cluster.MoveTopicPartition(topic, int32(partition), leader))
+	}
+
+	md := scrapeTopics(t, Config{
+		ClientConfig:         clientCfg,
+		MetricsBuilderConfig: metadata.NewDefaultMetricsBuilderConfig(),
+		TopicMatch:           ".*",
+	})
+
+	require.Equal(t, map[string]int64{
+		"partition=0,topic=topic-a": 0,
+		"partition=1,topic=topic-a": 2,
+		"partition=2,topic=topic-a": 2,
+	}, intDataPoints(md, "kafka.partition.leader_id"))
+	require.Equal(t, map[string]int64{
+		"partition=0,topic=topic-a": 0,
+		"partition=1,topic=topic-a": 0,
+		"partition=2,topic=topic-a": 0,
+	}, intDataPoints(md, "kafka.partition.offline"))
+}
+
+func TestTopicScraperFranz_OfflinePartition(t *testing.T) {
+	const topic = "topic-a"
+	cluster, clientCfg := kafkatest.NewCluster(t, kfake.SeedTopics(2, topic), kfake.NumBrokers(2))
+	controlMetadataLeaders(cluster, topic, []int32{1, -1})
+	// The client otherwise keeps retrying to find the missing leader before listing offsets.
+	clientCfg.Metadata.Retry.Max = 0
+
+	md, _ := scrapeTopicsErr(t, Config{
+		ClientConfig:         clientCfg,
+		MetricsBuilderConfig: metadata.NewDefaultMetricsBuilderConfig(),
+		TopicMatch:           ".*",
+	})
+
+	require.Equal(t, map[string]int64{
+		"partition=0,topic=topic-a": 0,
+		"partition=1,topic=topic-a": 1,
+	}, intDataPoints(md, "kafka.partition.offline"))
+	require.Equal(t, map[string]int64{
+		"partition=0,topic=topic-a": 1,
+		"partition=1,topic=topic-a": -1,
+	}, intDataPoints(md, "kafka.partition.leader_id"))
+}
+
+func TestTopicScraperFranz_TopicSize(t *testing.T) {
+	const topic = "topic-a"
+	cluster, clientCfg := kafkatest.NewCluster(t, kfake.SeedTopics(2, topic, "other"), kfake.NumBrokers(2))
+	require.NoError(t, cluster.MoveTopicPartition(topic, 0, 0))
+	require.NoError(t, cluster.MoveTopicPartition(topic, 1, 1))
+
+	// Each broker holds both partitions: the leader replica and a lagging follower of the other.
+	var requested []string
+	controlLogDirs(t, cluster, func(node int32, req *kmsg.DescribeLogDirsRequest) []kmsg.DescribeLogDirsResponseDir {
+		for _, rt := range req.Topics {
+			requested = append(requested, rt.Topic)
+		}
+		switch node {
+		case 0:
+			return []kmsg.DescribeLogDirsResponseDir{
+				logDir("/data", -1, -1, map[int32]int64{0: 100, 1: 90}),
+				futureLogDir("/moving", map[int32]int64{0: 7}),
+			}
+		default:
+			return []kmsg.DescribeLogDirsResponseDir{logDir("/data", -1, -1, map[int32]int64{0: 95, 1: 200})}
+		}
+	})
+
+	cfg := Config{
+		ClientConfig:         clientCfg,
+		MetricsBuilderConfig: metadata.NewDefaultMetricsBuilderConfig(),
+		TopicMatch:           "^topic-a$",
+	}
+	cfg.MetricsBuilderConfig.Metrics.KafkaTopicSize.Enabled = true
+	md := scrapeTopics(t, cfg)
+
+	require.Equal(t, map[string]int64{"topic=topic-a": 300}, intDataPoints(md, "kafka.topic.size"))
+	require.NotEmpty(t, requested)
+	for _, topic := range requested {
+		require.Equal(t, "topic-a", topic, "log dirs must be described only for matched topics")
+	}
+}
+
+func TestTopicScraperFranz_TopicSizeDisabledByDefault(t *testing.T) {
+	cluster, clientCfg := kafkatest.NewCluster(t, kfake.SeedTopics(1, "topic-a"))
+	var described bool
+	cluster.ControlKey(kmsg.DescribeLogDirs.Int16(), func(kmsg.Request) (kmsg.Response, error, bool) {
+		described = true
+		return nil, nil, false
+	})
+
+	md := scrapeTopics(t, Config{
+		ClientConfig:         clientCfg,
+		MetricsBuilderConfig: metadata.NewDefaultMetricsBuilderConfig(),
+		TopicMatch:           ".*",
+	})
+
+	require.Empty(t, intDataPoints(md, "kafka.topic.size"))
+	require.False(t, described)
+}
+
+func scrapeTopics(t *testing.T, cfg Config) pmetric.Metrics {
+	t.Helper()
+	md, err := scrapeTopicsErr(t, cfg)
+	require.NoError(t, err)
+	return md
+}
+
+func scrapeTopicsErr(t *testing.T, cfg Config) (pmetric.Metrics, error) {
+	t.Helper()
+	s, err := createTopicsScraperFranz(t.Context(), cfg, receivertest.NewNopSettings(metadata.Type), nil)
+	require.NoError(t, err)
+	require.NoError(t, s.Start(t.Context(), componenttest.NewNopHost()))
+	t.Cleanup(func() { require.NoError(t, s.Shutdown(t.Context())) })
+	return s.ScrapeMetrics(t.Context())
+}
+
+// intDataPoints maps each data point of the named metric, keyed by its sorted "k=v" attributes, to its value.
+func intDataPoints(md pmetric.Metrics, name string) map[string]int64 {
+	out := map[string]int64{}
+	for i := 0; i < md.ResourceMetrics().Len(); i++ {
+		sms := md.ResourceMetrics().At(i).ScopeMetrics()
+		for j := 0; j < sms.Len(); j++ {
+			ms := sms.At(j).Metrics()
+			for k := 0; k < ms.Len(); k++ {
+				m := ms.At(k)
+				if m.Name() != name {
+					continue
+				}
+				var dps pmetric.NumberDataPointSlice
+				if m.Type() == pmetric.MetricTypeSum {
+					dps = m.Sum().DataPoints()
+				} else {
+					dps = m.Gauge().DataPoints()
+				}
+				for l := 0; l < dps.Len(); l++ {
+					var attrs []string
+					for key, v := range dps.At(l).Attributes().All() {
+						attrs = append(attrs, key+"="+v.AsString())
+					}
+					sort.Strings(attrs)
+					out[strings.Join(attrs, ",")] = dps.At(l).IntValue()
+				}
+			}
+		}
+	}
+	return out
+}
+
+// controlMetadataLeaders answers every Metadata request with one topic whose partition i is led by leaders[i] (-1 for none).
+func controlMetadataLeaders(cluster *kfake.Cluster, topic string, leaders []int32) {
+	cluster.ControlKey(kmsg.Metadata.Int16(), func(kreq kmsg.Request) (kmsg.Response, error, bool) {
+		cluster.KeepControl()
+		resp := kreq.ResponseKind().(*kmsg.MetadataResponse)
+		for i, addr := range cluster.ListenAddrs() {
+			host, port, _ := net.SplitHostPort(addr)
+			p, _ := strconv.ParseInt(port, 10, 32)
+			b := kmsg.NewMetadataResponseBroker()
+			b.NodeID, b.Host, b.Port = int32(i), host, int32(p)
+			resp.Brokers = append(resp.Brokers, b)
+		}
+		resp.ClusterID = new("kfake")
+		rt := kmsg.NewMetadataResponseTopic()
+		rt.Topic = new(topic)
+		for i, leader := range leaders {
+			rp := kmsg.NewMetadataResponseTopicPartition()
+			rp.Partition = int32(i)
+			rp.Leader = leader
+			if leader < 0 {
+				rp.ErrorCode = kerr.LeaderNotAvailable.Code
+			} else {
+				rp.Replicas, rp.ISR = []int32{leader}, []int32{leader}
+			}
+			rt.Partitions = append(rt.Partitions, rp)
+		}
+		resp.Topics = append(resp.Topics, rt)
+		return resp, nil, true
+	})
+}
+
+// controlLogDirs answers every DescribeLogDirs request with the directories dirsFor returns for the receiving broker.
+func controlLogDirs(t *testing.T, cluster *kfake.Cluster, dirsFor func(node int32, req *kmsg.DescribeLogDirsRequest) []kmsg.DescribeLogDirsResponseDir) {
+	t.Helper()
+	cluster.ControlKey(kmsg.DescribeLogDirs.Int16(), func(kreq kmsg.Request) (kmsg.Response, error, bool) {
+		cluster.KeepControl()
+		req := kreq.(*kmsg.DescribeLogDirsRequest)
+		resp := req.ResponseKind().(*kmsg.DescribeLogDirsResponse)
+		resp.Dirs = dirsFor(cluster.CurrentNode(), req)
+		return resp, nil, true
+	})
+}
+
+// logDir builds a directory holding the given topic-a partition sizes.
+func logDir(dir string, total, usable int64, sizes map[int32]int64) kmsg.DescribeLogDirsResponseDir {
+	d := kmsg.NewDescribeLogDirsResponseDir()
+	d.Dir, d.TotalBytes, d.UsableBytes = dir, total, usable
+	rt := kmsg.NewDescribeLogDirsResponseDirTopic()
+	rt.Topic = "topic-a"
+	for p, size := range sizes {
+		rp := kmsg.NewDescribeLogDirsResponseDirTopicPartition()
+		rp.Partition, rp.Size = p, size
+		rt.Partitions = append(rt.Partitions, rp)
+	}
+	d.Topics = append(d.Topics, rt)
+	return d
+}
+
+func futureLogDir(dir string, sizes map[int32]int64) kmsg.DescribeLogDirsResponseDir {
+	d := logDir(dir, -1, -1, sizes)
+	for i := range d.Topics[0].Partitions {
+		d.Topics[0].Partitions[i].IsFuture = true
+	}
+	return d
 }

@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/twmb/franz-go/pkg/kadm"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
@@ -170,6 +171,13 @@ func (s *topicScraperFranz) scrape(ctx context.Context) (pmetric.Metrics, error)
 		for pid := range det.Partitions {
 			pd := det.Partitions[pid]
 
+			s.mb.RecordKafkaPartitionLeaderIDDataPoint(now, int64(pd.Leader), topic, int64(pid))
+			var offline int64
+			if pd.Leader < 0 {
+				offline = 1
+			}
+			s.mb.RecordKafkaPartitionOfflineDataPoint(now, offline, topic, int64(pid))
+
 			// replicas
 			if s.config.MetricsBuilderConfig.Metrics.KafkaPartitionReplicas.Enabled {
 				s.mb.RecordKafkaPartitionReplicasDataPoint(now, int64(len(pd.Replicas)), topic, int64(pid))
@@ -194,12 +202,58 @@ func (s *topicScraperFranz) scrape(ctx context.Context) (pmetric.Metrics, error)
 		}
 	}
 
+	if s.config.MetricsBuilderConfig.Metrics.KafkaTopicSize.Enabled && len(matched) > 0 {
+		s.recordTopicSizes(ctx, adm, td, matched, now, &scrapeErrs)
+	}
+
 	rb := s.mb.NewResourceBuilder()
 	rb.SetKafkaClusterAlias(s.config.ClusterAlias)
 	if meta.Cluster != "" { // reuse cluster ID from metadata above; skip empty IDs
 		rb.SetKafkaClusterID(meta.Cluster)
 	}
 	return s.mb.Emit(metadata.WithResource(rb.Emit())), scrapeErrs.Combine()
+}
+
+// recordTopicSizes sums, per topic, the log size of each online partition's leader replica.
+func (s *topicScraperFranz) recordTopicSizes(ctx context.Context, adm *kadm.Client, td kadm.TopicDetails, matched []string, now pcommon.Timestamp, scrapeErrs *scrapererror.ScrapeErrors) {
+	// An empty set would describe every partition in the cluster, so callers must pass at least one topic.
+	set := make(kadm.TopicsSet, len(matched))
+	for _, topic := range matched {
+		set.Add(topic, td[topic].Partitions.Numbers()...)
+	}
+	dirs, err := adm.DescribeAllLogDirs(ctx, set)
+	if err != nil {
+		s.settings.Logger.Warn("franz-go: DescribeAllLogDirs failed", zap.Error(err))
+		scrapeErrs.AddPartial(len(matched), fmt.Errorf("DescribeAllLogDirs: %w", err))
+	}
+
+topics:
+	for _, topic := range matched {
+		var size int64
+		for pid, pd := range td[topic].Partitions {
+			if pd.Leader < 0 {
+				continue
+			}
+			brokerDirs, ok := dirs[pd.Leader]
+			if !ok {
+				continue topics // leader's broker did not answer; a partial sum would under-report
+			}
+			if dp, ok := currentReplica(brokerDirs, topic, pid); ok {
+				size += dp.Size
+			}
+		}
+		s.mb.RecordKafkaTopicSizeDataPoint(now, size, topic)
+	}
+}
+
+// currentReplica returns the partition's replica on a broker, ignoring a future replica still being copied.
+func currentReplica(dirs kadm.DescribedLogDirs, topic string, partition int32) (kadm.DescribedLogDirPartition, bool) {
+	for _, dir := range dirs {
+		if dp, ok := dir.Topics.Lookup(topic, partition); ok && !dp.IsFuture {
+			return dp, true
+		}
+	}
+	return kadm.DescribedLogDirPartition{}, false
 }
 
 // Factory helper for franz-go path (selected via feature gate elsewhere).

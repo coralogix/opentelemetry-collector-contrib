@@ -46,6 +46,30 @@ attributes:
 
 metrics:
   #  brokers scraper
+  kafka.broker.log_dirs.total:
+    enabled: false
+    description: Total size of the volumes holding the broker's log directories. Only emitted when every log directory reports it (Kafka 3.3+).
+    stability: development
+    unit: By
+    gauge:
+      value_type: int
+    attributes: [broker]
+  kafka.broker.log_dirs.usable:
+    enabled: false
+    description: Usable space on the volumes holding the broker's log directories. Only emitted when every log directory reports it (Kafka 3.3+).
+    stability: development
+    unit: By
+    gauge:
+      value_type: int
+    attributes: [broker]
+  kafka.broker.log_dirs.used:
+    enabled: false
+    description: Total size of all partition replicas stored in the broker's log directories.
+    stability: development
+    unit: By
+    gauge:
+      value_type: int
+    attributes: [broker]
   kafka.broker.log_retention_period:
     enabled: false
     description: log retention time (s) of a broker.
@@ -53,6 +77,16 @@ metrics:
     unit: "s"
     gauge:
       value_type: int
+    attributes: [broker]
+  kafka.broker.partitions_led:
+    enabled: true
+    description: Number of partitions, including internal topics, whose leader is the broker.
+    stability: development
+    unit: "{partitions}"
+    sum:
+      monotonic: false
+      value_type: int
+      aggregation_temporality: cumulative
     attributes: [broker]
   kafka.brokers:
     enabled: true
@@ -110,6 +144,22 @@ metrics:
   kafka.partition.current_offset:
     enabled: true
     description: Current offset of partition of topic.
+    stability: development
+    unit: "1"
+    gauge:
+      value_type: int
+    attributes: [topic, partition]
+  kafka.partition.leader_id:
+    enabled: true
+    description: ID of the broker leading the partition, or -1 when the partition has no leader.
+    stability: development
+    unit: "1"
+    gauge:
+      value_type: int
+    attributes: [topic, partition]
+  kafka.partition.offline:
+    enabled: true
+    description: Whether the partition has no leader (1) or has one (0).
     stability: development
     unit: "1"
     gauge:
@@ -182,6 +232,14 @@ metrics:
     description: replication factor of a topic.
     stability: development
     unit: "1"
+    gauge:
+      value_type: int
+    attributes: [topic]
+  kafka.topic.size:
+    enabled: false
+    description: Size of the topic's data, summing the leader replica of each partition.
+    stability: development
+    unit: By
     gauge:
       value_type: int
     attributes: [topic]

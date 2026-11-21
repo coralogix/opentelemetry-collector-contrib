@@ -12,6 +12,20 @@ metrics:
     enabled: false
 ```
 
+### kafka.broker.partitions_led
+
+Number of partitions, including internal topics, whose leader is the broker.
+
+| Unit | Metric Type | Value Type | Aggregation Temporality | Monotonic | Stability |
+| ---- | ----------- | ---------- | ----------------------- | --------- | --------- |
+| {partitions} | Sum | Int | Cumulative | false | Development |
+
+#### Attributes
+
+| Name | Description | Values | Requirement Level | Semantic Convention |
+| ---- | ----------- | ------ | ----------------- | ------------------- |
+| broker | The ID of the kafka broker | Any Str | Recommended | - |
+
 ### kafka.brokers
 
 Number of brokers in the cluster.
@@ -111,6 +125,36 @@ Current offset of partition of topic.
 | topic | The ID (integer) of a topic | Any Str | Recommended | - |
 | partition | The number (integer) of the partition | Any Int | Recommended | - |
 
+### kafka.partition.leader_id
+
+ID of the broker leading the partition, or -1 when the partition has no leader.
+
+| Unit | Metric Type | Value Type | Stability |
+| ---- | ----------- | ---------- | --------- |
+| 1 | Gauge | Int | Development |
+
+#### Attributes
+
+| Name | Description | Values | Requirement Level | Semantic Convention |
+| ---- | ----------- | ------ | ----------------- | ------------------- |
+| topic | The ID (integer) of a topic | Any Str | Recommended | - |
+| partition | The number (integer) of the partition | Any Int | Recommended | - |
+
+### kafka.partition.offline
+
+Whether the partition has no leader (1) or has one (0).
+
+| Unit | Metric Type | Value Type | Stability |
+| ---- | ----------- | ---------- | --------- |
+| 1 | Gauge | Int | Development |
+
+#### Attributes
+
+| Name | Description | Values | Requirement Level | Semantic Convention |
+| ---- | ----------- | ------ | ----------------- | ------------------- |
+| topic | The ID (integer) of a topic | Any Str | Recommended | - |
+| partition | The number (integer) of the partition | Any Int | Recommended | - |
+
 ### kafka.partition.oldest_offset
 
 Oldest offset of partition of topic
@@ -180,6 +224,48 @@ metrics:
     enabled: true
 ```
 
+### kafka.broker.log_dirs.total
+
+Total size of the volumes holding the broker's log directories. Only emitted when every log directory reports it (Kafka 3.3+).
+
+| Unit | Metric Type | Value Type | Stability |
+| ---- | ----------- | ---------- | --------- |
+| By | Gauge | Int | Development |
+
+#### Attributes
+
+| Name | Description | Values | Requirement Level | Semantic Convention |
+| ---- | ----------- | ------ | ----------------- | ------------------- |
+| broker | The ID of the kafka broker | Any Str | Recommended | - |
+
+### kafka.broker.log_dirs.usable
+
+Usable space on the volumes holding the broker's log directories. Only emitted when every log directory reports it (Kafka 3.3+).
+
+| Unit | Metric Type | Value Type | Stability |
+| ---- | ----------- | ---------- | --------- |
+| By | Gauge | Int | Development |
+
+#### Attributes
+
+| Name | Description | Values | Requirement Level | Semantic Convention |
+| ---- | ----------- | ------ | ----------------- | ------------------- |
+| broker | The ID of the kafka broker | Any Str | Recommended | - |
+
+### kafka.broker.log_dirs.used
+
+Total size of all partition replicas stored in the broker's log directories.
+
+| Unit | Metric Type | Value Type | Stability |
+| ---- | ----------- | ---------- | --------- |
+| By | Gauge | Int | Development |
+
+#### Attributes
+
+| Name | Description | Values | Requirement Level | Semantic Convention |
+| ---- | ----------- | ------ | ----------------- | ------------------- |
+| broker | The ID of the kafka broker | Any Str | Recommended | - |
+
 ### kafka.broker.log_retention_period
 
 log retention time (s) of a broker.
@@ -243,6 +329,20 @@ replication factor of a topic.
 | Unit | Metric Type | Value Type | Stability |
 | ---- | ----------- | ---------- | --------- |
 | 1 | Gauge | Int | Development |
+
+#### Attributes
+
+| Name | Description | Values | Requirement Level | Semantic Convention |
+| ---- | ----------- | ------ | ----------------- | ------------------- |
+| topic | The ID (integer) of a topic | Any Str | Recommended | - |
+
+### kafka.topic.size
+
+Size of the topic's data, summing the leader replica of each partition.
+
+| Unit | Metric Type | Value Type | Stability |
+| ---- | ----------- | ---------- | --------- |
+| By | Gauge | Int | Development |
 
 #### Attributes
 

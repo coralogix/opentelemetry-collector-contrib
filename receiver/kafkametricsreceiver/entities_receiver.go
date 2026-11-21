@@ -8,8 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -105,9 +107,7 @@ func (r *entitiesReceiver) Start(_ context.Context, host component.Host) error {
 	r.clients.retain()
 	ctx, cancel := context.WithCancel(context.Background())
 	r.cancel = cancel
-	r.wg.Add(1)
-	go func() {
-		defer r.wg.Done()
+	r.wg.Go(func() {
 		r.collect(ctx)
 		if r.cfg.MetadataCollectionInterval <= 0 {
 			return
@@ -122,7 +122,7 @@ func (r *entitiesReceiver) Start(_ context.Context, host component.Host) error {
 				return
 			}
 		}
-	}()
+	})
 	return nil
 }
 
@@ -361,7 +361,7 @@ func (r *entitiesReceiver) quorum(ctx context.Context, metadataController int32,
 	for _, v := range p.CurrentVoters {
 		voters = append(voters, v.ReplicaID)
 	}
-	sort.Slice(voters, func(i, j int) bool { return voters[i] < voters[j] })
+	slices.Sort(voters)
 	return p.LeaderID, voters, "kraft"
 }
 
@@ -491,11 +491,11 @@ func idKey(id map[string]string) string {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	s := ""
+	var b strings.Builder
 	for _, k := range keys {
-		s += k + "=" + id[k] + ";"
+		b.WriteString(k + "=" + id[k] + ";")
 	}
-	return s
+	return b.String()
 }
 
 func replicationFactor(t kadm.TopicDetail) int {

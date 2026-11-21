@@ -150,7 +150,7 @@ func TestEntities_ReportsClusterBrokersTopicsAndGroups(t *testing.T) {
 
 	for _, rec := range recs {
 		for k := range rec.attrs {
-			assert.False(t, strings.Contains(k, "password"), "sensitive setting %q must not be sent", k)
+			assert.NotContains(t, k, "password", "sensitive setting %q must not be sent", k)
 		}
 	}
 }
@@ -173,7 +173,7 @@ func TestEntities_DefaultSettingsOnlyWhenCurated(t *testing.T) {
 	cfg.EntityConfigs.Enabled = false
 	recs = build(t, newTestEntitiesReceiver(t, *cfg))
 	for k := range byType(recs, "entity_state", entityTypeTopic)[0].attrs {
-		assert.False(t, strings.Contains(k, ".config"), "no settings when entity_configs is off, got %q", k)
+		assert.NotContains(t, k, ".config", "no settings when entity_configs is off, got %q", k)
 	}
 }
 
