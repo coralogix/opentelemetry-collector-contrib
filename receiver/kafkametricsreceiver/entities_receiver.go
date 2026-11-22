@@ -257,6 +257,10 @@ func (r *entitiesReceiver) buildEvents(ctx context.Context) (metadataPkg.EntityE
 		attrs.PutInt("kafka.topic.partitions", int64(len(t.Partitions)))
 		attrs.PutInt("kafka.topic.replication_factor", int64(replicationFactor(t)))
 		attrs.PutBool("kafka.topic.internal", t.IsInternal)
+		hosts := attrs.PutEmptySlice("kafka.topic.brokers")
+		for _, id := range replicaBrokers(t) {
+			hosts.AppendEmpty().SetStr(strconv.Itoa(int(id)))
+		}
 		r.putConfigs(attrs, "kafka.topic", topicConfigs[name], curatedTopicConfigs)
 	}
 
@@ -501,6 +505,22 @@ func idKey(id map[string]string) string {
 		b.WriteString(k + "=" + id[k] + ";")
 	}
 	return b.String()
+}
+
+// replicaBrokers returns the sorted IDs of the brokers holding a replica of any of the topic's partitions.
+func replicaBrokers(t kadm.TopicDetail) []int32 {
+	seen := map[int32]struct{}{}
+	for _, p := range t.Partitions {
+		for _, id := range p.Replicas {
+			seen[id] = struct{}{}
+		}
+	}
+	ids := make([]int32, 0, len(seen))
+	for id := range seen {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	return ids
 }
 
 func replicationFactor(t kadm.TopicDetail) int {

@@ -140,6 +140,16 @@ func TestEntities_ReportsClusterBrokersTopicsAndGroups(t *testing.T) {
 	tp := topics[0]
 	assert.Equal(t, topic, tp.id[attrTopicName])
 	assert.Equal(t, int64(2), tp.attrs["kafka.topic.partitions"])
+	brokerIDs := map[any]bool{}
+	for _, b := range brokers {
+		brokerIDs[b.id[attrBrokerID]] = true
+	}
+	hosts, ok := tp.attrs["kafka.topic.brokers"].([]any)
+	require.True(t, ok)
+	require.NotEmpty(t, hosts)
+	for _, h := range hosts {
+		assert.True(t, brokerIDs[h], "topic broker %v is one of the cluster's brokers", h)
+	}
 	assert.Equal(t, retention, tp.attrs["kafka.topic.config.retention.ms"])
 	assert.Equal(t, "DYNAMIC_TOPIC_CONFIG", tp.attrs["kafka.topic.config_source.retention.ms"])
 
