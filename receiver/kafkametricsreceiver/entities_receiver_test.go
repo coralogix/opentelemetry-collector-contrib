@@ -5,6 +5,7 @@ package kafkametricsreceiver
 
 import (
 	"context"
+	"maps"
 	"strings"
 	"testing"
 	"time"
@@ -270,9 +271,7 @@ func TestEntities_ClusterCarriesTheSettingsBrokersStartFrom(t *testing.T) {
 	cluster := byType(recs, "entity_state", entityTypeCluster)[0]
 	brokerValues := map[string]any{}
 	for _, b := range byType(recs, "entity_state", entityTypeBroker) {
-		for k, v := range b.attrs {
-			brokerValues[k] = v
-		}
+		maps.Copy(brokerValues, b.attrs)
 	}
 	found := 0
 	for k, v := range cluster.attrs {
