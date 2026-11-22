@@ -6,6 +6,7 @@ package kafkametricsreceiver
 import (
 	"context"
 	"maps"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -129,6 +130,11 @@ func TestEntities_ReportsClusterBrokersTopicsAndGroups(t *testing.T) {
 
 	brokers := byType(recs, "entity_state", entityTypeBroker)
 	require.Len(t, brokers, 3)
+	var brokerHosts []any
+	for _, b := range brokers {
+		brokerHosts = append(brokerHosts, b.attrs["kafka.broker.host"])
+	}
+	assert.ElementsMatch(t, slices.Compact(brokerHosts), clusters[0].attrs["kafka.cluster.broker_hosts"])
 	for _, b := range brokers {
 		assert.Equal(t, clusterID, b.id[attrClusterID], "child IDs carry the cluster so two clusters never collide")
 		assert.NotEmpty(t, b.id[attrBrokerID])
@@ -158,6 +164,7 @@ func TestEntities_ReportsClusterBrokersTopicsAndGroups(t *testing.T) {
 	require.Len(t, groups, 1)
 	assert.Equal(t, group, groups[0].id[attrGroupName])
 	assert.Equal(t, []any{topic}, groups[0].attrs["kafka.consumer_group.topics"])
+	assert.NotEmpty(t, groups[0].attrs["kafka.consumer_group.coordinator.host"])
 
 	for _, rec := range recs {
 		for k := range rec.attrs {

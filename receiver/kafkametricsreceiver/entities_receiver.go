@@ -226,6 +226,15 @@ func (r *entitiesReceiver) buildEvents(ctx context.Context) (metadataPkg.EntityE
 	}
 	r.putConfigs(cluster, "kafka.cluster", brokerConfigs[""], curatedBrokerConfigs)
 	r.putStartingConfigs(cluster, brokerConfigs, controller, md.Brokers.NodeIDs())
+	hosts := make([]string, 0, len(md.Brokers))
+	for _, b := range md.Brokers {
+		hosts = append(hosts, b.Host)
+	}
+	slices.Sort(hosts)
+	brokerHosts := cluster.PutEmptySlice("kafka.cluster.broker_hosts")
+	for _, h := range slices.Compact(hosts) {
+		brokerHosts.AppendEmpty().SetStr(h)
+	}
 
 	// Brokers
 	for _, b := range md.Brokers {
@@ -313,6 +322,7 @@ func (r *entitiesReceiver) groups(ctx context.Context, adm *kadm.Client, cluster
 		putNonEmpty(attrs, "kafka.consumer_group.protocol_type", l.ProtocolType)
 		putNonEmpty(attrs, "kafka.consumer_group.assignor", l.Protocol)
 		attrs.PutStr("kafka.consumer_group.coordinator.id", strconv.Itoa(int(l.Coordinator.NodeID)))
+		putNonEmpty(attrs, "kafka.consumer_group.coordinator.host", l.Coordinator.Host)
 		attrs.PutInt("kafka.consumer_group.members", int64(len(l.Members)))
 		members := attrs.PutEmptySlice("kafka.consumer_group.member_list")
 		for _, m := range l.Members {
