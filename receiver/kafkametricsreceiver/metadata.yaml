@@ -88,6 +88,26 @@ metrics:
       value_type: int
       aggregation_temporality: cumulative
     attributes: [broker]
+  kafka.broker.replicas:
+    enabled: true
+    description: Number of partition replicas, including internal topics, hosted on the broker.
+    stability: development
+    unit: "{replicas}"
+    sum:
+      monotonic: false
+      value_type: int
+      aggregation_temporality: cumulative
+    attributes: [broker]
+  kafka.broker.replicas.under_replicated:
+    enabled: true
+    description: Number of replicas hosted on the broker whose partition has fewer in-sync replicas than replicas.
+    stability: development
+    unit: "{replicas}"
+    sum:
+      monotonic: false
+      value_type: int
+      aggregation_temporality: cumulative
+    attributes: [broker]
   kafka.brokers:
     enabled: true
     description: Number of brokers in the cluster.

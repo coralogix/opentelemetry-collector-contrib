@@ -26,6 +26,34 @@ Number of partitions, including internal topics, whose leader is the broker.
 | ---- | ----------- | ------ | ----------------- | ------------------- |
 | broker | The ID of the kafka broker | Any Str | Recommended | - |
 
+### kafka.broker.replicas
+
+Number of partition replicas, including internal topics, hosted on the broker.
+
+| Unit | Metric Type | Value Type | Aggregation Temporality | Monotonic | Stability |
+| ---- | ----------- | ---------- | ----------------------- | --------- | --------- |
+| {replicas} | Sum | Int | Cumulative | false | Development |
+
+#### Attributes
+
+| Name | Description | Values | Requirement Level | Semantic Convention |
+| ---- | ----------- | ------ | ----------------- | ------------------- |
+| broker | The ID of the kafka broker | Any Str | Recommended | - |
+
+### kafka.broker.replicas.under_replicated
+
+Number of replicas hosted on the broker whose partition has fewer in-sync replicas than replicas.
+
+| Unit | Metric Type | Value Type | Aggregation Temporality | Monotonic | Stability |
+| ---- | ----------- | ---------- | ----------------------- | --------- | --------- |
+| {replicas} | Sum | Int | Cumulative | false | Development |
+
+#### Attributes
+
+| Name | Description | Values | Requirement Level | Semantic Convention |
+| ---- | ----------- | ------ | ----------------- | ------------------- |
+| broker | The ID of the kafka broker | Any Str | Recommended | - |
+
 ### kafka.brokers
 
 Number of brokers in the cluster.

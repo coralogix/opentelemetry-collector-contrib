@@ -5,6 +5,8 @@ package kafkametricsreceiver
 
 import (
 	"context"
+	"net"
+	"strconv"
 	"testing"
 	"time"
 
@@ -371,4 +373,44 @@ func scrapeBrokers(t *testing.T, cfg Config) pmetric.Metrics {
 	md, err := s.ScrapeMetrics(t.Context())
 	require.NoError(t, err)
 	return md
+}
+
+func TestBrokerScraperFranz_Replicas(t *testing.T) {
+	cluster, clientCfg := kafkatest.NewCluster(t, kfake.SeedTopics(2, "topic-a"), kfake.NumBrokers(3))
+	controlMetadataReplicas(cluster, "topic-a", [][2][]int32{
+		{{0, 1, 2}, {0, 1, 2}},
+		{{1, 2}, {1}},
+	})
+
+	md := scrapeBrokers(t, Config{ClientConfig: clientCfg, MetricsBuilderConfig: metadata.NewDefaultMetricsBuilderConfig()})
+
+	require.Equal(t, map[string]int64{"broker=0": 1, "broker=1": 2, "broker=2": 2}, intDataPoints(md, "kafka.broker.replicas"))
+	require.Equal(t, map[string]int64{"broker=0": 0, "broker=1": 1, "broker=2": 1}, intDataPoints(md, "kafka.broker.replicas.under_replicated"))
+}
+
+// controlMetadataReplicas answers Metadata with one partition per {replicas, isr} pair, led by its first replica.
+func controlMetadataReplicas(cluster *kfake.Cluster, topic string, partitions [][2][]int32) {
+	cluster.ControlKey(kmsg.Metadata.Int16(), func(kreq kmsg.Request) (kmsg.Response, error, bool) {
+		cluster.KeepControl()
+		resp := kreq.ResponseKind().(*kmsg.MetadataResponse)
+		for i, addr := range cluster.ListenAddrs() {
+			host, port, _ := net.SplitHostPort(addr)
+			p, _ := strconv.ParseInt(port, 10, 32)
+			b := kmsg.NewMetadataResponseBroker()
+			b.NodeID, b.Host, b.Port = int32(i), host, int32(p)
+			resp.Brokers = append(resp.Brokers, b)
+		}
+		resp.ClusterID = new("kfake")
+		rt := kmsg.NewMetadataResponseTopic()
+		rt.Topic = new(topic)
+		for i, replicasAndISR := range partitions {
+			rp := kmsg.NewMetadataResponseTopicPartition()
+			rp.Partition = int32(i)
+			rp.Replicas, rp.ISR = replicasAndISR[0], replicasAndISR[1]
+			rp.Leader = rp.Replicas[0]
+			rt.Partitions = append(rt.Partitions, rp)
+		}
+		resp.Topics = append(resp.Topics, rt)
+		return resp, nil, true
+	})
 }

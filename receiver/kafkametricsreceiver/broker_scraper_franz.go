@@ -63,9 +63,10 @@ func (s *brokerScraperFranz) scrape(ctx context.Context) (pmetric.Metrics, error
 	rb.SetKafkaClusterAlias(s.config.ClusterAlias)
 
 	metrics := s.config.MetricsBuilderConfig.Metrics
-	// Partition leadership needs every topic; otherwise a topic-less request is enough.
+	// Partition leadership and replica placement need every topic; otherwise a topic-less request is enough.
+	needsTopics := metrics.KafkaBrokerPartitionsLed.Enabled || metrics.KafkaBrokerReplicas.Enabled || metrics.KafkaBrokerReplicasUnderReplicated.Enabled
 	var meta kadm.Metadata
-	if metrics.KafkaBrokerPartitionsLed.Enabled {
+	if needsTopics {
 		meta, err = adm.Metadata(ctx)
 	} else {
 		meta, err = adm.BrokerMetadata(ctx)
@@ -85,6 +86,29 @@ func (s *brokerScraperFranz) scrape(ctx context.Context) (pmetric.Metrics, error
 		meta.Topics.EachPartition(func(pd kadm.PartitionDetail) { led[pd.Leader]++ })
 		for _, bid := range brokerIDs {
 			s.mb.RecordKafkaBrokerPartitionsLedDataPoint(now, led[bid], strconv.Itoa(int(bid)))
+		}
+	}
+
+	if metrics.KafkaBrokerReplicas.Enabled || metrics.KafkaBrokerReplicasUnderReplicated.Enabled {
+		hosted := make(map[int32]int64, len(brokerIDs))
+		behind := make(map[int32]int64, len(brokerIDs))
+		meta.Topics.EachPartition(func(pd kadm.PartitionDetail) {
+			underReplicated := len(pd.ISR) < len(pd.Replicas)
+			for _, replica := range pd.Replicas {
+				hosted[replica]++
+				if underReplicated {
+					behind[replica]++
+				}
+			}
+		})
+		for _, bid := range brokerIDs {
+			bidStr := strconv.Itoa(int(bid))
+			if metrics.KafkaBrokerReplicas.Enabled {
+				s.mb.RecordKafkaBrokerReplicasDataPoint(now, hosted[bid], bidStr)
+			}
+			if metrics.KafkaBrokerReplicasUnderReplicated.Enabled {
+				s.mb.RecordKafkaBrokerReplicasUnderReplicatedDataPoint(now, behind[bid], bidStr)
+			}
 		}
 	}
 

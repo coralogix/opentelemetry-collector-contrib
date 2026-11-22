@@ -249,6 +249,102 @@ func (ms *KafkaBrokerPartitionsLedMetricConfig) Validate() error {
 	return nil
 }
 
+// KafkaBrokerReplicasMetricAttributeKey specifies the key of an attribute for the kafka.broker.replicas metric.
+type KafkaBrokerReplicasMetricAttributeKey string
+
+const (
+	KafkaBrokerReplicasMetricAttributeKeyBroker KafkaBrokerReplicasMetricAttributeKey = "broker"
+)
+
+// KafkaBrokerReplicasMetricConfig provides config for the kafka.broker.replicas metric.
+type KafkaBrokerReplicasMetricConfig struct {
+	Enabled          bool `mapstructure:"enabled"`
+	enabledSetByUser bool
+
+	AggregationStrategy string                                  `mapstructure:"aggregation_strategy"`
+	EnabledAttributes   []KafkaBrokerReplicasMetricAttributeKey `mapstructure:"attributes"`
+}
+
+func (ms *KafkaBrokerReplicasMetricConfig) Unmarshal(parser *confmap.Conf) error {
+	if parser == nil {
+		return nil
+	}
+
+	err := parser.Unmarshal(ms)
+	if err != nil {
+		return err
+	}
+
+	ms.enabledSetByUser = parser.IsSet("enabled")
+	return nil
+}
+
+func (ms *KafkaBrokerReplicasMetricConfig) Validate() error {
+	for _, val := range ms.EnabledAttributes {
+		switch val {
+		case KafkaBrokerReplicasMetricAttributeKeyBroker:
+		default:
+			return fmt.Errorf("metric kafka.broker.replicas doesn't have an attribute %v, valid attributes: [broker]", val)
+		}
+	}
+
+	switch ms.AggregationStrategy {
+	case AggregationStrategySum, AggregationStrategyAvg, AggregationStrategyMin, AggregationStrategyMax:
+	default:
+		return fmt.Errorf("invalid aggregation strategy %q, valid strategies: [%s, %s, %s, %s]", ms.AggregationStrategy, AggregationStrategySum, AggregationStrategyAvg, AggregationStrategyMin, AggregationStrategyMax)
+	}
+
+	return nil
+}
+
+// KafkaBrokerReplicasUnderReplicatedMetricAttributeKey specifies the key of an attribute for the kafka.broker.replicas.under_replicated metric.
+type KafkaBrokerReplicasUnderReplicatedMetricAttributeKey string
+
+const (
+	KafkaBrokerReplicasUnderReplicatedMetricAttributeKeyBroker KafkaBrokerReplicasUnderReplicatedMetricAttributeKey = "broker"
+)
+
+// KafkaBrokerReplicasUnderReplicatedMetricConfig provides config for the kafka.broker.replicas.under_replicated metric.
+type KafkaBrokerReplicasUnderReplicatedMetricConfig struct {
+	Enabled          bool `mapstructure:"enabled"`
+	enabledSetByUser bool
+
+	AggregationStrategy string                                                 `mapstructure:"aggregation_strategy"`
+	EnabledAttributes   []KafkaBrokerReplicasUnderReplicatedMetricAttributeKey `mapstructure:"attributes"`
+}
+
+func (ms *KafkaBrokerReplicasUnderReplicatedMetricConfig) Unmarshal(parser *confmap.Conf) error {
+	if parser == nil {
+		return nil
+	}
+
+	err := parser.Unmarshal(ms)
+	if err != nil {
+		return err
+	}
+
+	ms.enabledSetByUser = parser.IsSet("enabled")
+	return nil
+}
+
+func (ms *KafkaBrokerReplicasUnderReplicatedMetricConfig) Validate() error {
+	for _, val := range ms.EnabledAttributes {
+		switch val {
+		case KafkaBrokerReplicasUnderReplicatedMetricAttributeKeyBroker:
+		default:
+			return fmt.Errorf("metric kafka.broker.replicas.under_replicated doesn't have an attribute %v, valid attributes: [broker]", val)
+		}
+	}
+
+	switch ms.AggregationStrategy {
+	case AggregationStrategySum, AggregationStrategyAvg, AggregationStrategyMin, AggregationStrategyMax:
+	default:
+		return fmt.Errorf("invalid aggregation strategy %q, valid strategies: [%s, %s, %s, %s]", ms.AggregationStrategy, AggregationStrategySum, AggregationStrategyAvg, AggregationStrategyMin, AggregationStrategyMax)
+	}
+
+	return nil
+}
+
 // KafkaBrokersMetricConfig provides config for the kafka.brokers metric.
 type KafkaBrokersMetricConfig struct {
 	Enabled          bool `mapstructure:"enabled"`
@@ -1099,29 +1195,31 @@ func (ms *KafkaTopicSizeMetricConfig) Validate() error {
 
 // MetricsConfig provides config for kafka_metrics metrics.
 type MetricsConfig struct {
-	KafkaBrokerLogDirsTotal       KafkaBrokerLogDirsTotalMetricConfig       `mapstructure:"kafka.broker.log_dirs.total"`
-	KafkaBrokerLogDirsUsable      KafkaBrokerLogDirsUsableMetricConfig      `mapstructure:"kafka.broker.log_dirs.usable"`
-	KafkaBrokerLogDirsUsed        KafkaBrokerLogDirsUsedMetricConfig        `mapstructure:"kafka.broker.log_dirs.used"`
-	KafkaBrokerLogRetentionPeriod KafkaBrokerLogRetentionPeriodMetricConfig `mapstructure:"kafka.broker.log_retention_period"`
-	KafkaBrokerPartitionsLed      KafkaBrokerPartitionsLedMetricConfig      `mapstructure:"kafka.broker.partitions_led"`
-	KafkaBrokers                  KafkaBrokersMetricConfig                  `mapstructure:"kafka.brokers"`
-	KafkaConsumerGroupLag         KafkaConsumerGroupLagMetricConfig         `mapstructure:"kafka.consumer_group.lag"`
-	KafkaConsumerGroupLagSum      KafkaConsumerGroupLagSumMetricConfig      `mapstructure:"kafka.consumer_group.lag_sum"`
-	KafkaConsumerGroupMembers     KafkaConsumerGroupMembersMetricConfig     `mapstructure:"kafka.consumer_group.members"`
-	KafkaConsumerGroupOffset      KafkaConsumerGroupOffsetMetricConfig      `mapstructure:"kafka.consumer_group.offset"`
-	KafkaConsumerGroupOffsetSum   KafkaConsumerGroupOffsetSumMetricConfig   `mapstructure:"kafka.consumer_group.offset_sum"`
-	KafkaPartitionCurrentOffset   KafkaPartitionCurrentOffsetMetricConfig   `mapstructure:"kafka.partition.current_offset"`
-	KafkaPartitionLeaderID        KafkaPartitionLeaderIDMetricConfig        `mapstructure:"kafka.partition.leader_id"`
-	KafkaPartitionOffline         KafkaPartitionOfflineMetricConfig         `mapstructure:"kafka.partition.offline"`
-	KafkaPartitionOldestOffset    KafkaPartitionOldestOffsetMetricConfig    `mapstructure:"kafka.partition.oldest_offset"`
-	KafkaPartitionReplicas        KafkaPartitionReplicasMetricConfig        `mapstructure:"kafka.partition.replicas"`
-	KafkaPartitionReplicasInSync  KafkaPartitionReplicasInSyncMetricConfig  `mapstructure:"kafka.partition.replicas_in_sync"`
-	KafkaTopicLogRetentionPeriod  KafkaTopicLogRetentionPeriodMetricConfig  `mapstructure:"kafka.topic.log_retention_period"`
-	KafkaTopicLogRetentionSize    KafkaTopicLogRetentionSizeMetricConfig    `mapstructure:"kafka.topic.log_retention_size"`
-	KafkaTopicMinInsyncReplicas   KafkaTopicMinInsyncReplicasMetricConfig   `mapstructure:"kafka.topic.min_insync_replicas"`
-	KafkaTopicPartitions          KafkaTopicPartitionsMetricConfig          `mapstructure:"kafka.topic.partitions"`
-	KafkaTopicReplicationFactor   KafkaTopicReplicationFactorMetricConfig   `mapstructure:"kafka.topic.replication_factor"`
-	KafkaTopicSize                KafkaTopicSizeMetricConfig                `mapstructure:"kafka.topic.size"`
+	KafkaBrokerLogDirsTotal            KafkaBrokerLogDirsTotalMetricConfig            `mapstructure:"kafka.broker.log_dirs.total"`
+	KafkaBrokerLogDirsUsable           KafkaBrokerLogDirsUsableMetricConfig           `mapstructure:"kafka.broker.log_dirs.usable"`
+	KafkaBrokerLogDirsUsed             KafkaBrokerLogDirsUsedMetricConfig             `mapstructure:"kafka.broker.log_dirs.used"`
+	KafkaBrokerLogRetentionPeriod      KafkaBrokerLogRetentionPeriodMetricConfig      `mapstructure:"kafka.broker.log_retention_period"`
+	KafkaBrokerPartitionsLed           KafkaBrokerPartitionsLedMetricConfig           `mapstructure:"kafka.broker.partitions_led"`
+	KafkaBrokerReplicas                KafkaBrokerReplicasMetricConfig                `mapstructure:"kafka.broker.replicas"`
+	KafkaBrokerReplicasUnderReplicated KafkaBrokerReplicasUnderReplicatedMetricConfig `mapstructure:"kafka.broker.replicas.under_replicated"`
+	KafkaBrokers                       KafkaBrokersMetricConfig                       `mapstructure:"kafka.brokers"`
+	KafkaConsumerGroupLag              KafkaConsumerGroupLagMetricConfig              `mapstructure:"kafka.consumer_group.lag"`
+	KafkaConsumerGroupLagSum           KafkaConsumerGroupLagSumMetricConfig           `mapstructure:"kafka.consumer_group.lag_sum"`
+	KafkaConsumerGroupMembers          KafkaConsumerGroupMembersMetricConfig          `mapstructure:"kafka.consumer_group.members"`
+	KafkaConsumerGroupOffset           KafkaConsumerGroupOffsetMetricConfig           `mapstructure:"kafka.consumer_group.offset"`
+	KafkaConsumerGroupOffsetSum        KafkaConsumerGroupOffsetSumMetricConfig        `mapstructure:"kafka.consumer_group.offset_sum"`
+	KafkaPartitionCurrentOffset        KafkaPartitionCurrentOffsetMetricConfig        `mapstructure:"kafka.partition.current_offset"`
+	KafkaPartitionLeaderID             KafkaPartitionLeaderIDMetricConfig             `mapstructure:"kafka.partition.leader_id"`
+	KafkaPartitionOffline              KafkaPartitionOfflineMetricConfig              `mapstructure:"kafka.partition.offline"`
+	KafkaPartitionOldestOffset         KafkaPartitionOldestOffsetMetricConfig         `mapstructure:"kafka.partition.oldest_offset"`
+	KafkaPartitionReplicas             KafkaPartitionReplicasMetricConfig             `mapstructure:"kafka.partition.replicas"`
+	KafkaPartitionReplicasInSync       KafkaPartitionReplicasInSyncMetricConfig       `mapstructure:"kafka.partition.replicas_in_sync"`
+	KafkaTopicLogRetentionPeriod       KafkaTopicLogRetentionPeriodMetricConfig       `mapstructure:"kafka.topic.log_retention_period"`
+	KafkaTopicLogRetentionSize         KafkaTopicLogRetentionSizeMetricConfig         `mapstructure:"kafka.topic.log_retention_size"`
+	KafkaTopicMinInsyncReplicas        KafkaTopicMinInsyncReplicasMetricConfig        `mapstructure:"kafka.topic.min_insync_replicas"`
+	KafkaTopicPartitions               KafkaTopicPartitionsMetricConfig               `mapstructure:"kafka.topic.partitions"`
+	KafkaTopicReplicationFactor        KafkaTopicReplicationFactorMetricConfig        `mapstructure:"kafka.topic.replication_factor"`
+	KafkaTopicSize                     KafkaTopicSizeMetricConfig                     `mapstructure:"kafka.topic.size"`
 }
 
 func DefaultMetricsConfig() MetricsConfig {
@@ -1150,6 +1248,16 @@ func DefaultMetricsConfig() MetricsConfig {
 			Enabled:             true,
 			AggregationStrategy: AggregationStrategySum,
 			EnabledAttributes:   []KafkaBrokerPartitionsLedMetricAttributeKey{KafkaBrokerPartitionsLedMetricAttributeKeyBroker},
+		},
+		KafkaBrokerReplicas: KafkaBrokerReplicasMetricConfig{
+			Enabled:             true,
+			AggregationStrategy: AggregationStrategySum,
+			EnabledAttributes:   []KafkaBrokerReplicasMetricAttributeKey{KafkaBrokerReplicasMetricAttributeKeyBroker},
+		},
+		KafkaBrokerReplicasUnderReplicated: KafkaBrokerReplicasUnderReplicatedMetricConfig{
+			Enabled:             true,
+			AggregationStrategy: AggregationStrategySum,
+			EnabledAttributes:   []KafkaBrokerReplicasUnderReplicatedMetricAttributeKey{KafkaBrokerReplicasUnderReplicatedMetricAttributeKeyBroker},
 		},
 		KafkaBrokers: KafkaBrokersMetricConfig{
 			Enabled: true,

@@ -3,14 +3,15 @@
 package metadata
 
 import (
+	"slices"
+	"time"
+
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/filter"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/pdata/xpdata/xhash"
 	"go.opentelemetry.io/collector/receiver"
-	"slices"
-	"time"
 )
 
 const (
@@ -48,6 +49,14 @@ var MetricsInfo = metricsInfo{
 	},
 	KafkaBrokerPartitionsLed: metricInfo{
 		Name:       "kafka.broker.partitions_led",
+		Attributes: []string{"broker"},
+	},
+	KafkaBrokerReplicas: metricInfo{
+		Name:       "kafka.broker.replicas",
+		Attributes: []string{"broker"},
+	},
+	KafkaBrokerReplicasUnderReplicated: metricInfo{
+		Name:       "kafka.broker.replicas.under_replicated",
 		Attributes: []string{"broker"},
 	},
 	KafkaBrokers: metricInfo{
@@ -124,29 +133,31 @@ var MetricsInfo = metricsInfo{
 }
 
 type metricsInfo struct {
-	KafkaBrokerLogDirsTotal       metricInfo
-	KafkaBrokerLogDirsUsable      metricInfo
-	KafkaBrokerLogDirsUsed        metricInfo
-	KafkaBrokerLogRetentionPeriod metricInfo
-	KafkaBrokerPartitionsLed      metricInfo
-	KafkaBrokers                  metricInfo
-	KafkaConsumerGroupLag         metricInfo
-	KafkaConsumerGroupLagSum      metricInfo
-	KafkaConsumerGroupMembers     metricInfo
-	KafkaConsumerGroupOffset      metricInfo
-	KafkaConsumerGroupOffsetSum   metricInfo
-	KafkaPartitionCurrentOffset   metricInfo
-	KafkaPartitionLeaderID        metricInfo
-	KafkaPartitionOffline         metricInfo
-	KafkaPartitionOldestOffset    metricInfo
-	KafkaPartitionReplicas        metricInfo
-	KafkaPartitionReplicasInSync  metricInfo
-	KafkaTopicLogRetentionPeriod  metricInfo
-	KafkaTopicLogRetentionSize    metricInfo
-	KafkaTopicMinInsyncReplicas   metricInfo
-	KafkaTopicPartitions          metricInfo
-	KafkaTopicReplicationFactor   metricInfo
-	KafkaTopicSize                metricInfo
+	KafkaBrokerLogDirsTotal            metricInfo
+	KafkaBrokerLogDirsUsable           metricInfo
+	KafkaBrokerLogDirsUsed             metricInfo
+	KafkaBrokerLogRetentionPeriod      metricInfo
+	KafkaBrokerPartitionsLed           metricInfo
+	KafkaBrokerReplicas                metricInfo
+	KafkaBrokerReplicasUnderReplicated metricInfo
+	KafkaBrokers                       metricInfo
+	KafkaConsumerGroupLag              metricInfo
+	KafkaConsumerGroupLagSum           metricInfo
+	KafkaConsumerGroupMembers          metricInfo
+	KafkaConsumerGroupOffset           metricInfo
+	KafkaConsumerGroupOffsetSum        metricInfo
+	KafkaPartitionCurrentOffset        metricInfo
+	KafkaPartitionLeaderID             metricInfo
+	KafkaPartitionOffline              metricInfo
+	KafkaPartitionOldestOffset         metricInfo
+	KafkaPartitionReplicas             metricInfo
+	KafkaPartitionReplicasInSync       metricInfo
+	KafkaTopicLogRetentionPeriod       metricInfo
+	KafkaTopicLogRetentionSize         metricInfo
+	KafkaTopicMinInsyncReplicas        metricInfo
+	KafkaTopicPartitions               metricInfo
+	KafkaTopicReplicationFactor        metricInfo
+	KafkaTopicSize                     metricInfo
 }
 
 type metricInfo struct {
@@ -603,6 +614,192 @@ func (m *metricKafkaBrokerPartitionsLed) emit(metrics pmetric.MetricSlice) {
 
 func newMetricKafkaBrokerPartitionsLed(cfg KafkaBrokerPartitionsLedMetricConfig) metricKafkaBrokerPartitionsLed {
 	m := metricKafkaBrokerPartitionsLed{config: cfg}
+
+	if cfg.Enabled {
+		m.data = pmetric.NewMetric()
+		m.init()
+	}
+	return m
+}
+
+type metricKafkaBrokerReplicas struct {
+	data          pmetric.Metric                  // data buffer for generated metric.
+	config        KafkaBrokerReplicasMetricConfig // metric config provided by user.
+	capacity      int                             // max observed number of data points added to the metric.
+	aggDataPoints []int64                         // slice containing number of aggregated datapoints at each index
+	dpIndex       map[uint64]int                  // maps a data point's hash to its index, for O(1) dedup lookup.
+}
+
+// init fills kafka.broker.replicas metric with initial data.
+func (m *metricKafkaBrokerReplicas) init() {
+	m.data.SetName("kafka.broker.replicas")
+	m.data.SetDescription("Number of partition replicas, including internal topics, hosted on the broker.")
+	m.data.SetUnit("{replicas}")
+	m.data.SetEmptySum()
+	m.data.Sum().SetIsMonotonic(false)
+	m.data.Sum().SetAggregationTemporality(pmetric.AggregationTemporalityCumulative)
+	m.data.Sum().DataPoints().EnsureCapacity(m.capacity)
+	m.aggDataPoints = m.aggDataPoints[:0]
+	m.dpIndex = make(map[uint64]int, m.capacity)
+}
+
+func (m *metricKafkaBrokerReplicas) recordDataPoint(start pcommon.Timestamp, ts pcommon.Timestamp, val int64, brokerAttributeValue string) {
+	if !m.config.Enabled {
+		return
+	}
+
+	dp := pmetric.NewNumberDataPoint()
+	dp.SetStartTimestamp(start)
+	dp.SetTimestamp(ts)
+	if slices.Contains(m.config.EnabledAttributes, KafkaBrokerReplicasMetricAttributeKeyBroker) {
+		dp.Attributes().PutStr("broker", brokerAttributeValue)
+	}
+
+	var s string
+	key := dataPointKey(dp)
+	dps := m.data.Sum().DataPoints()
+	if i, ok := m.dpIndex[key]; ok {
+		dpi := dps.At(i)
+		switch s = m.config.AggregationStrategy; s {
+		case AggregationStrategySum, AggregationStrategyAvg:
+			dpi.SetIntValue(dpi.IntValue() + val)
+			m.aggDataPoints[i] += 1
+			return
+		case AggregationStrategyMin:
+			if dpi.IntValue() > val {
+				dpi.SetIntValue(val)
+			}
+			return
+		case AggregationStrategyMax:
+			if dpi.IntValue() < val {
+				dpi.SetIntValue(val)
+			}
+			return
+		}
+	}
+
+	dp.SetIntValue(val)
+	m.aggDataPoints = append(m.aggDataPoints, 1)
+	m.dpIndex[key] = dps.Len()
+	dp.MoveTo(dps.AppendEmpty())
+}
+
+// updateCapacity saves max length of data point slices that will be used for the slice capacity.
+func (m *metricKafkaBrokerReplicas) updateCapacity() {
+	if m.data.Sum().DataPoints().Len() > m.capacity {
+		m.capacity = m.data.Sum().DataPoints().Len()
+	}
+}
+
+// emit appends recorded metric data to a metrics slice and prepares it for recording another set of data points.
+func (m *metricKafkaBrokerReplicas) emit(metrics pmetric.MetricSlice) {
+	if m.config.Enabled && m.data.Sum().DataPoints().Len() > 0 {
+		if m.config.AggregationStrategy == AggregationStrategyAvg {
+			for i, aggCount := range m.aggDataPoints {
+				m.data.Sum().DataPoints().At(i).SetIntValue(m.data.Sum().DataPoints().At(i).IntValue() / aggCount)
+			}
+		}
+		m.updateCapacity()
+		m.data.MoveTo(metrics.AppendEmpty())
+		m.init()
+	}
+}
+
+func newMetricKafkaBrokerReplicas(cfg KafkaBrokerReplicasMetricConfig) metricKafkaBrokerReplicas {
+	m := metricKafkaBrokerReplicas{config: cfg}
+
+	if cfg.Enabled {
+		m.data = pmetric.NewMetric()
+		m.init()
+	}
+	return m
+}
+
+type metricKafkaBrokerReplicasUnderReplicated struct {
+	data          pmetric.Metric                                 // data buffer for generated metric.
+	config        KafkaBrokerReplicasUnderReplicatedMetricConfig // metric config provided by user.
+	capacity      int                                            // max observed number of data points added to the metric.
+	aggDataPoints []int64                                        // slice containing number of aggregated datapoints at each index
+	dpIndex       map[uint64]int                                 // maps a data point's hash to its index, for O(1) dedup lookup.
+}
+
+// init fills kafka.broker.replicas.under_replicated metric with initial data.
+func (m *metricKafkaBrokerReplicasUnderReplicated) init() {
+	m.data.SetName("kafka.broker.replicas.under_replicated")
+	m.data.SetDescription("Number of replicas hosted on the broker whose partition has fewer in-sync replicas than replicas.")
+	m.data.SetUnit("{replicas}")
+	m.data.SetEmptySum()
+	m.data.Sum().SetIsMonotonic(false)
+	m.data.Sum().SetAggregationTemporality(pmetric.AggregationTemporalityCumulative)
+	m.data.Sum().DataPoints().EnsureCapacity(m.capacity)
+	m.aggDataPoints = m.aggDataPoints[:0]
+	m.dpIndex = make(map[uint64]int, m.capacity)
+}
+
+func (m *metricKafkaBrokerReplicasUnderReplicated) recordDataPoint(start pcommon.Timestamp, ts pcommon.Timestamp, val int64, brokerAttributeValue string) {
+	if !m.config.Enabled {
+		return
+	}
+
+	dp := pmetric.NewNumberDataPoint()
+	dp.SetStartTimestamp(start)
+	dp.SetTimestamp(ts)
+	if slices.Contains(m.config.EnabledAttributes, KafkaBrokerReplicasUnderReplicatedMetricAttributeKeyBroker) {
+		dp.Attributes().PutStr("broker", brokerAttributeValue)
+	}
+
+	var s string
+	key := dataPointKey(dp)
+	dps := m.data.Sum().DataPoints()
+	if i, ok := m.dpIndex[key]; ok {
+		dpi := dps.At(i)
+		switch s = m.config.AggregationStrategy; s {
+		case AggregationStrategySum, AggregationStrategyAvg:
+			dpi.SetIntValue(dpi.IntValue() + val)
+			m.aggDataPoints[i] += 1
+			return
+		case AggregationStrategyMin:
+			if dpi.IntValue() > val {
+				dpi.SetIntValue(val)
+			}
+			return
+		case AggregationStrategyMax:
+			if dpi.IntValue() < val {
+				dpi.SetIntValue(val)
+			}
+			return
+		}
+	}
+
+	dp.SetIntValue(val)
+	m.aggDataPoints = append(m.aggDataPoints, 1)
+	m.dpIndex[key] = dps.Len()
+	dp.MoveTo(dps.AppendEmpty())
+}
+
+// updateCapacity saves max length of data point slices that will be used for the slice capacity.
+func (m *metricKafkaBrokerReplicasUnderReplicated) updateCapacity() {
+	if m.data.Sum().DataPoints().Len() > m.capacity {
+		m.capacity = m.data.Sum().DataPoints().Len()
+	}
+}
+
+// emit appends recorded metric data to a metrics slice and prepares it for recording another set of data points.
+func (m *metricKafkaBrokerReplicasUnderReplicated) emit(metrics pmetric.MetricSlice) {
+	if m.config.Enabled && m.data.Sum().DataPoints().Len() > 0 {
+		if m.config.AggregationStrategy == AggregationStrategyAvg {
+			for i, aggCount := range m.aggDataPoints {
+				m.data.Sum().DataPoints().At(i).SetIntValue(m.data.Sum().DataPoints().At(i).IntValue() / aggCount)
+			}
+		}
+		m.updateCapacity()
+		m.data.MoveTo(metrics.AppendEmpty())
+		m.init()
+	}
+}
+
+func newMetricKafkaBrokerReplicasUnderReplicated(cfg KafkaBrokerReplicasUnderReplicatedMetricConfig) metricKafkaBrokerReplicasUnderReplicated {
+	m := metricKafkaBrokerReplicasUnderReplicated{config: cfg}
 
 	if cfg.Enabled {
 		m.data = pmetric.NewMetric()
@@ -2257,36 +2454,38 @@ func newMetricKafkaTopicSize(cfg KafkaTopicSizeMetricConfig) metricKafkaTopicSiz
 // MetricsBuilder provides an interface for scrapers to report metrics while taking care of all the transformations
 // required to produce metric representation defined in metadata and user config.
 type MetricsBuilder struct {
-	config                              MetricsBuilderConfig // config of the metrics builder.
-	startTime                           pcommon.Timestamp    // start time that will be applied to all recorded data points.
-	metricsCapacity                     int                  // maximum observed number of metrics per resource.
-	metricsBuffer                       pmetric.Metrics      // accumulates metrics data before emitting.
-	buildInfo                           component.BuildInfo  // contains version information.
-	resourceAttributeIncludeFilter      map[string]filter.Filter
-	resourceAttributeExcludeFilter      map[string]filter.Filter
-	metricKafkaBrokerLogDirsTotal       metricKafkaBrokerLogDirsTotal
-	metricKafkaBrokerLogDirsUsable      metricKafkaBrokerLogDirsUsable
-	metricKafkaBrokerLogDirsUsed        metricKafkaBrokerLogDirsUsed
-	metricKafkaBrokerLogRetentionPeriod metricKafkaBrokerLogRetentionPeriod
-	metricKafkaBrokerPartitionsLed      metricKafkaBrokerPartitionsLed
-	metricKafkaBrokers                  metricKafkaBrokers
-	metricKafkaConsumerGroupLag         metricKafkaConsumerGroupLag
-	metricKafkaConsumerGroupLagSum      metricKafkaConsumerGroupLagSum
-	metricKafkaConsumerGroupMembers     metricKafkaConsumerGroupMembers
-	metricKafkaConsumerGroupOffset      metricKafkaConsumerGroupOffset
-	metricKafkaConsumerGroupOffsetSum   metricKafkaConsumerGroupOffsetSum
-	metricKafkaPartitionCurrentOffset   metricKafkaPartitionCurrentOffset
-	metricKafkaPartitionLeaderID        metricKafkaPartitionLeaderID
-	metricKafkaPartitionOffline         metricKafkaPartitionOffline
-	metricKafkaPartitionOldestOffset    metricKafkaPartitionOldestOffset
-	metricKafkaPartitionReplicas        metricKafkaPartitionReplicas
-	metricKafkaPartitionReplicasInSync  metricKafkaPartitionReplicasInSync
-	metricKafkaTopicLogRetentionPeriod  metricKafkaTopicLogRetentionPeriod
-	metricKafkaTopicLogRetentionSize    metricKafkaTopicLogRetentionSize
-	metricKafkaTopicMinInsyncReplicas   metricKafkaTopicMinInsyncReplicas
-	metricKafkaTopicPartitions          metricKafkaTopicPartitions
-	metricKafkaTopicReplicationFactor   metricKafkaTopicReplicationFactor
-	metricKafkaTopicSize                metricKafkaTopicSize
+	config                                   MetricsBuilderConfig // config of the metrics builder.
+	startTime                                pcommon.Timestamp    // start time that will be applied to all recorded data points.
+	metricsCapacity                          int                  // maximum observed number of metrics per resource.
+	metricsBuffer                            pmetric.Metrics      // accumulates metrics data before emitting.
+	buildInfo                                component.BuildInfo  // contains version information.
+	resourceAttributeIncludeFilter           map[string]filter.Filter
+	resourceAttributeExcludeFilter           map[string]filter.Filter
+	metricKafkaBrokerLogDirsTotal            metricKafkaBrokerLogDirsTotal
+	metricKafkaBrokerLogDirsUsable           metricKafkaBrokerLogDirsUsable
+	metricKafkaBrokerLogDirsUsed             metricKafkaBrokerLogDirsUsed
+	metricKafkaBrokerLogRetentionPeriod      metricKafkaBrokerLogRetentionPeriod
+	metricKafkaBrokerPartitionsLed           metricKafkaBrokerPartitionsLed
+	metricKafkaBrokerReplicas                metricKafkaBrokerReplicas
+	metricKafkaBrokerReplicasUnderReplicated metricKafkaBrokerReplicasUnderReplicated
+	metricKafkaBrokers                       metricKafkaBrokers
+	metricKafkaConsumerGroupLag              metricKafkaConsumerGroupLag
+	metricKafkaConsumerGroupLagSum           metricKafkaConsumerGroupLagSum
+	metricKafkaConsumerGroupMembers          metricKafkaConsumerGroupMembers
+	metricKafkaConsumerGroupOffset           metricKafkaConsumerGroupOffset
+	metricKafkaConsumerGroupOffsetSum        metricKafkaConsumerGroupOffsetSum
+	metricKafkaPartitionCurrentOffset        metricKafkaPartitionCurrentOffset
+	metricKafkaPartitionLeaderID             metricKafkaPartitionLeaderID
+	metricKafkaPartitionOffline              metricKafkaPartitionOffline
+	metricKafkaPartitionOldestOffset         metricKafkaPartitionOldestOffset
+	metricKafkaPartitionReplicas             metricKafkaPartitionReplicas
+	metricKafkaPartitionReplicasInSync       metricKafkaPartitionReplicasInSync
+	metricKafkaTopicLogRetentionPeriod       metricKafkaTopicLogRetentionPeriod
+	metricKafkaTopicLogRetentionSize         metricKafkaTopicLogRetentionSize
+	metricKafkaTopicMinInsyncReplicas        metricKafkaTopicMinInsyncReplicas
+	metricKafkaTopicPartitions               metricKafkaTopicPartitions
+	metricKafkaTopicReplicationFactor        metricKafkaTopicReplicationFactor
+	metricKafkaTopicSize                     metricKafkaTopicSize
 }
 
 // MetricBuilderOption applies changes to default metrics builder.
@@ -2308,35 +2507,37 @@ func WithStartTime(startTime pcommon.Timestamp) MetricBuilderOption {
 }
 func NewMetricsBuilder(mbc MetricsBuilderConfig, settings receiver.Settings, options ...MetricBuilderOption) *MetricsBuilder {
 	mb := &MetricsBuilder{
-		config:                              mbc,
-		startTime:                           pcommon.NewTimestampFromTime(time.Now()),
-		metricsBuffer:                       pmetric.NewMetrics(),
-		buildInfo:                           settings.BuildInfo,
-		metricKafkaBrokerLogDirsTotal:       newMetricKafkaBrokerLogDirsTotal(mbc.Metrics.KafkaBrokerLogDirsTotal),
-		metricKafkaBrokerLogDirsUsable:      newMetricKafkaBrokerLogDirsUsable(mbc.Metrics.KafkaBrokerLogDirsUsable),
-		metricKafkaBrokerLogDirsUsed:        newMetricKafkaBrokerLogDirsUsed(mbc.Metrics.KafkaBrokerLogDirsUsed),
-		metricKafkaBrokerLogRetentionPeriod: newMetricKafkaBrokerLogRetentionPeriod(mbc.Metrics.KafkaBrokerLogRetentionPeriod),
-		metricKafkaBrokerPartitionsLed:      newMetricKafkaBrokerPartitionsLed(mbc.Metrics.KafkaBrokerPartitionsLed),
-		metricKafkaBrokers:                  newMetricKafkaBrokers(mbc.Metrics.KafkaBrokers),
-		metricKafkaConsumerGroupLag:         newMetricKafkaConsumerGroupLag(mbc.Metrics.KafkaConsumerGroupLag),
-		metricKafkaConsumerGroupLagSum:      newMetricKafkaConsumerGroupLagSum(mbc.Metrics.KafkaConsumerGroupLagSum),
-		metricKafkaConsumerGroupMembers:     newMetricKafkaConsumerGroupMembers(mbc.Metrics.KafkaConsumerGroupMembers),
-		metricKafkaConsumerGroupOffset:      newMetricKafkaConsumerGroupOffset(mbc.Metrics.KafkaConsumerGroupOffset),
-		metricKafkaConsumerGroupOffsetSum:   newMetricKafkaConsumerGroupOffsetSum(mbc.Metrics.KafkaConsumerGroupOffsetSum),
-		metricKafkaPartitionCurrentOffset:   newMetricKafkaPartitionCurrentOffset(mbc.Metrics.KafkaPartitionCurrentOffset),
-		metricKafkaPartitionLeaderID:        newMetricKafkaPartitionLeaderID(mbc.Metrics.KafkaPartitionLeaderID),
-		metricKafkaPartitionOffline:         newMetricKafkaPartitionOffline(mbc.Metrics.KafkaPartitionOffline),
-		metricKafkaPartitionOldestOffset:    newMetricKafkaPartitionOldestOffset(mbc.Metrics.KafkaPartitionOldestOffset),
-		metricKafkaPartitionReplicas:        newMetricKafkaPartitionReplicas(mbc.Metrics.KafkaPartitionReplicas),
-		metricKafkaPartitionReplicasInSync:  newMetricKafkaPartitionReplicasInSync(mbc.Metrics.KafkaPartitionReplicasInSync),
-		metricKafkaTopicLogRetentionPeriod:  newMetricKafkaTopicLogRetentionPeriod(mbc.Metrics.KafkaTopicLogRetentionPeriod),
-		metricKafkaTopicLogRetentionSize:    newMetricKafkaTopicLogRetentionSize(mbc.Metrics.KafkaTopicLogRetentionSize),
-		metricKafkaTopicMinInsyncReplicas:   newMetricKafkaTopicMinInsyncReplicas(mbc.Metrics.KafkaTopicMinInsyncReplicas),
-		metricKafkaTopicPartitions:          newMetricKafkaTopicPartitions(mbc.Metrics.KafkaTopicPartitions),
-		metricKafkaTopicReplicationFactor:   newMetricKafkaTopicReplicationFactor(mbc.Metrics.KafkaTopicReplicationFactor),
-		metricKafkaTopicSize:                newMetricKafkaTopicSize(mbc.Metrics.KafkaTopicSize),
-		resourceAttributeIncludeFilter:      make(map[string]filter.Filter),
-		resourceAttributeExcludeFilter:      make(map[string]filter.Filter),
+		config:                                   mbc,
+		startTime:                                pcommon.NewTimestampFromTime(time.Now()),
+		metricsBuffer:                            pmetric.NewMetrics(),
+		buildInfo:                                settings.BuildInfo,
+		metricKafkaBrokerLogDirsTotal:            newMetricKafkaBrokerLogDirsTotal(mbc.Metrics.KafkaBrokerLogDirsTotal),
+		metricKafkaBrokerLogDirsUsable:           newMetricKafkaBrokerLogDirsUsable(mbc.Metrics.KafkaBrokerLogDirsUsable),
+		metricKafkaBrokerLogDirsUsed:             newMetricKafkaBrokerLogDirsUsed(mbc.Metrics.KafkaBrokerLogDirsUsed),
+		metricKafkaBrokerLogRetentionPeriod:      newMetricKafkaBrokerLogRetentionPeriod(mbc.Metrics.KafkaBrokerLogRetentionPeriod),
+		metricKafkaBrokerPartitionsLed:           newMetricKafkaBrokerPartitionsLed(mbc.Metrics.KafkaBrokerPartitionsLed),
+		metricKafkaBrokerReplicas:                newMetricKafkaBrokerReplicas(mbc.Metrics.KafkaBrokerReplicas),
+		metricKafkaBrokerReplicasUnderReplicated: newMetricKafkaBrokerReplicasUnderReplicated(mbc.Metrics.KafkaBrokerReplicasUnderReplicated),
+		metricKafkaBrokers:                       newMetricKafkaBrokers(mbc.Metrics.KafkaBrokers),
+		metricKafkaConsumerGroupLag:              newMetricKafkaConsumerGroupLag(mbc.Metrics.KafkaConsumerGroupLag),
+		metricKafkaConsumerGroupLagSum:           newMetricKafkaConsumerGroupLagSum(mbc.Metrics.KafkaConsumerGroupLagSum),
+		metricKafkaConsumerGroupMembers:          newMetricKafkaConsumerGroupMembers(mbc.Metrics.KafkaConsumerGroupMembers),
+		metricKafkaConsumerGroupOffset:           newMetricKafkaConsumerGroupOffset(mbc.Metrics.KafkaConsumerGroupOffset),
+		metricKafkaConsumerGroupOffsetSum:        newMetricKafkaConsumerGroupOffsetSum(mbc.Metrics.KafkaConsumerGroupOffsetSum),
+		metricKafkaPartitionCurrentOffset:        newMetricKafkaPartitionCurrentOffset(mbc.Metrics.KafkaPartitionCurrentOffset),
+		metricKafkaPartitionLeaderID:             newMetricKafkaPartitionLeaderID(mbc.Metrics.KafkaPartitionLeaderID),
+		metricKafkaPartitionOffline:              newMetricKafkaPartitionOffline(mbc.Metrics.KafkaPartitionOffline),
+		metricKafkaPartitionOldestOffset:         newMetricKafkaPartitionOldestOffset(mbc.Metrics.KafkaPartitionOldestOffset),
+		metricKafkaPartitionReplicas:             newMetricKafkaPartitionReplicas(mbc.Metrics.KafkaPartitionReplicas),
+		metricKafkaPartitionReplicasInSync:       newMetricKafkaPartitionReplicasInSync(mbc.Metrics.KafkaPartitionReplicasInSync),
+		metricKafkaTopicLogRetentionPeriod:       newMetricKafkaTopicLogRetentionPeriod(mbc.Metrics.KafkaTopicLogRetentionPeriod),
+		metricKafkaTopicLogRetentionSize:         newMetricKafkaTopicLogRetentionSize(mbc.Metrics.KafkaTopicLogRetentionSize),
+		metricKafkaTopicMinInsyncReplicas:        newMetricKafkaTopicMinInsyncReplicas(mbc.Metrics.KafkaTopicMinInsyncReplicas),
+		metricKafkaTopicPartitions:               newMetricKafkaTopicPartitions(mbc.Metrics.KafkaTopicPartitions),
+		metricKafkaTopicReplicationFactor:        newMetricKafkaTopicReplicationFactor(mbc.Metrics.KafkaTopicReplicationFactor),
+		metricKafkaTopicSize:                     newMetricKafkaTopicSize(mbc.Metrics.KafkaTopicSize),
+		resourceAttributeIncludeFilter:           make(map[string]filter.Filter),
+		resourceAttributeExcludeFilter:           make(map[string]filter.Filter),
 	}
 	if mbc.ResourceAttributes.KafkaClusterAlias.MetricsInclude != nil {
 		mb.resourceAttributeIncludeFilter["kafka.cluster.alias"] = filter.CreateFilter(mbc.ResourceAttributes.KafkaClusterAlias.MetricsInclude)
@@ -2424,6 +2625,8 @@ func (mb *MetricsBuilder) EmitForResource(options ...ResourceMetricsOption) {
 	mb.metricKafkaBrokerLogDirsUsed.emit(ils.Metrics())
 	mb.metricKafkaBrokerLogRetentionPeriod.emit(ils.Metrics())
 	mb.metricKafkaBrokerPartitionsLed.emit(ils.Metrics())
+	mb.metricKafkaBrokerReplicas.emit(ils.Metrics())
+	mb.metricKafkaBrokerReplicasUnderReplicated.emit(ils.Metrics())
 	mb.metricKafkaBrokers.emit(ils.Metrics())
 	mb.metricKafkaConsumerGroupLag.emit(ils.Metrics())
 	mb.metricKafkaConsumerGroupLagSum.emit(ils.Metrics())
@@ -2496,6 +2699,16 @@ func (mb *MetricsBuilder) RecordKafkaBrokerLogRetentionPeriodDataPoint(ts pcommo
 // RecordKafkaBrokerPartitionsLedDataPoint adds a data point to kafka.broker.partitions_led metric.
 func (mb *MetricsBuilder) RecordKafkaBrokerPartitionsLedDataPoint(ts pcommon.Timestamp, val int64, brokerAttributeValue string) {
 	mb.metricKafkaBrokerPartitionsLed.recordDataPoint(mb.startTime, ts, val, brokerAttributeValue)
+}
+
+// RecordKafkaBrokerReplicasDataPoint adds a data point to kafka.broker.replicas metric.
+func (mb *MetricsBuilder) RecordKafkaBrokerReplicasDataPoint(ts pcommon.Timestamp, val int64, brokerAttributeValue string) {
+	mb.metricKafkaBrokerReplicas.recordDataPoint(mb.startTime, ts, val, brokerAttributeValue)
+}
+
+// RecordKafkaBrokerReplicasUnderReplicatedDataPoint adds a data point to kafka.broker.replicas.under_replicated metric.
+func (mb *MetricsBuilder) RecordKafkaBrokerReplicasUnderReplicatedDataPoint(ts pcommon.Timestamp, val int64, brokerAttributeValue string) {
+	mb.metricKafkaBrokerReplicasUnderReplicated.recordDataPoint(mb.startTime, ts, val, brokerAttributeValue)
 }
 
 // RecordKafkaBrokersDataPoint adds a data point to kafka.brokers metric.

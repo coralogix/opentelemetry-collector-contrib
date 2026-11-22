@@ -16,6 +16,12 @@ all_set:
     kafka.broker.partitions_led:
       enabled: true
       attributes: ["broker"]
+    kafka.broker.replicas:
+      enabled: true
+      attributes: ["broker"]
+    kafka.broker.replicas.under_replicated:
+      enabled: true
+      attributes: ["broker"]
     kafka.brokers:
       enabled: true
     kafka.consumer_group.lag:
@@ -91,6 +97,12 @@ reaggregate_set:
     kafka.broker.partitions_led:
       enabled: true
       attributes: []
+    kafka.broker.replicas:
+      enabled: true
+      attributes: []
+    kafka.broker.replicas.under_replicated:
+      enabled: true
+      attributes: []
     kafka.brokers:
       enabled: true
     kafka.consumer_group.lag:
@@ -164,6 +176,12 @@ none_set:
       enabled: false
       attributes: ["broker"]
     kafka.broker.partitions_led:
+      enabled: false
+      attributes: ["broker"]
+    kafka.broker.replicas:
+      enabled: false
+      attributes: ["broker"]
+    kafka.broker.replicas.under_replicated:
       enabled: false
       attributes: ["broker"]
     kafka.brokers:
