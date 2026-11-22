@@ -201,6 +201,56 @@ func (ms *KafkaBrokerLogRetentionPeriodMetricConfig) Validate() error {
 	return nil
 }
 
+// KafkaBrokerPartitionSizeMetricAttributeKey specifies the key of an attribute for the kafka.broker.partition.size metric.
+type KafkaBrokerPartitionSizeMetricAttributeKey string
+
+const (
+	KafkaBrokerPartitionSizeMetricAttributeKeyBroker    KafkaBrokerPartitionSizeMetricAttributeKey = "broker"
+	KafkaBrokerPartitionSizeMetricAttributeKeyTopic     KafkaBrokerPartitionSizeMetricAttributeKey = "topic"
+	KafkaBrokerPartitionSizeMetricAttributeKeyPartition KafkaBrokerPartitionSizeMetricAttributeKey = "partition"
+)
+
+// KafkaBrokerPartitionSizeMetricConfig provides config for the kafka.broker.partition.size metric.
+type KafkaBrokerPartitionSizeMetricConfig struct {
+	Enabled          bool `mapstructure:"enabled"`
+	enabledSetByUser bool
+
+	AggregationStrategy string                                       `mapstructure:"aggregation_strategy"`
+	EnabledAttributes   []KafkaBrokerPartitionSizeMetricAttributeKey `mapstructure:"attributes"`
+}
+
+func (ms *KafkaBrokerPartitionSizeMetricConfig) Unmarshal(parser *confmap.Conf) error {
+	if parser == nil {
+		return nil
+	}
+
+	err := parser.Unmarshal(ms)
+	if err != nil {
+		return err
+	}
+
+	ms.enabledSetByUser = parser.IsSet("enabled")
+	return nil
+}
+
+func (ms *KafkaBrokerPartitionSizeMetricConfig) Validate() error {
+	for _, val := range ms.EnabledAttributes {
+		switch val {
+		case KafkaBrokerPartitionSizeMetricAttributeKeyBroker, KafkaBrokerPartitionSizeMetricAttributeKeyTopic, KafkaBrokerPartitionSizeMetricAttributeKeyPartition:
+		default:
+			return fmt.Errorf("metric kafka.broker.partition.size doesn't have an attribute %v, valid attributes: [broker, topic, partition]", val)
+		}
+	}
+
+	switch ms.AggregationStrategy {
+	case AggregationStrategySum, AggregationStrategyAvg, AggregationStrategyMin, AggregationStrategyMax:
+	default:
+		return fmt.Errorf("invalid aggregation strategy %q, valid strategies: [%s, %s, %s, %s]", ms.AggregationStrategy, AggregationStrategySum, AggregationStrategyAvg, AggregationStrategyMin, AggregationStrategyMax)
+	}
+
+	return nil
+}
+
 // KafkaBrokerPartitionsLedMetricAttributeKey specifies the key of an attribute for the kafka.broker.partitions_led metric.
 type KafkaBrokerPartitionsLedMetricAttributeKey string
 
@@ -1199,6 +1249,7 @@ type MetricsConfig struct {
 	KafkaBrokerLogDirsUsable           KafkaBrokerLogDirsUsableMetricConfig           `mapstructure:"kafka.broker.log_dirs.usable"`
 	KafkaBrokerLogDirsUsed             KafkaBrokerLogDirsUsedMetricConfig             `mapstructure:"kafka.broker.log_dirs.used"`
 	KafkaBrokerLogRetentionPeriod      KafkaBrokerLogRetentionPeriodMetricConfig      `mapstructure:"kafka.broker.log_retention_period"`
+	KafkaBrokerPartitionSize           KafkaBrokerPartitionSizeMetricConfig           `mapstructure:"kafka.broker.partition.size"`
 	KafkaBrokerPartitionsLed           KafkaBrokerPartitionsLedMetricConfig           `mapstructure:"kafka.broker.partitions_led"`
 	KafkaBrokerReplicas                KafkaBrokerReplicasMetricConfig                `mapstructure:"kafka.broker.replicas"`
 	KafkaBrokerReplicasUnderReplicated KafkaBrokerReplicasUnderReplicatedMetricConfig `mapstructure:"kafka.broker.replicas.under_replicated"`
@@ -1243,6 +1294,11 @@ func DefaultMetricsConfig() MetricsConfig {
 			Enabled:             false,
 			AggregationStrategy: AggregationStrategyAvg,
 			EnabledAttributes:   []KafkaBrokerLogRetentionPeriodMetricAttributeKey{KafkaBrokerLogRetentionPeriodMetricAttributeKeyBroker},
+		},
+		KafkaBrokerPartitionSize: KafkaBrokerPartitionSizeMetricConfig{
+			Enabled:             false,
+			AggregationStrategy: AggregationStrategyAvg,
+			EnabledAttributes:   []KafkaBrokerPartitionSizeMetricAttributeKey{KafkaBrokerPartitionSizeMetricAttributeKeyBroker, KafkaBrokerPartitionSizeMetricAttributeKeyTopic, KafkaBrokerPartitionSizeMetricAttributeKeyPartition},
 		},
 		KafkaBrokerPartitionsLed: KafkaBrokerPartitionsLedMetricConfig{
 			Enabled:             true,

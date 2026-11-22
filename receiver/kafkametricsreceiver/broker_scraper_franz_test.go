@@ -319,8 +319,15 @@ func TestBrokerScraperFranz_LogDirs(t *testing.T) {
 	cfg.MetricsBuilderConfig.Metrics.KafkaBrokerLogDirsUsed.Enabled = true
 	cfg.MetricsBuilderConfig.Metrics.KafkaBrokerLogDirsTotal.Enabled = true
 	cfg.MetricsBuilderConfig.Metrics.KafkaBrokerLogDirsUsable.Enabled = true
+	cfg.MetricsBuilderConfig.Metrics.KafkaBrokerPartitionSize.Enabled = true
 	md := scrapeBrokers(t, cfg)
 
+	require.Equal(t, map[string]int64{
+		"broker=0,partition=0,topic=topic-a": 100,
+		"broker=0,partition=1,topic=topic-a": 50,
+		"broker=0,partition=2,topic=topic-a": 25,
+		"broker=1,partition=0,topic=topic-a": 10,
+	}, intDataPoints(md, "kafka.broker.partition.size"))
 	require.Equal(t, map[string]int64{"broker=0": 175, "broker=1": 10}, intDataPoints(md, "kafka.broker.log_dirs.used"))
 	require.Equal(t, map[string]int64{"broker=0": 3000}, intDataPoints(md, "kafka.broker.log_dirs.total"))
 	require.Equal(t, map[string]int64{"broker=0": 1400}, intDataPoints(md, "kafka.broker.log_dirs.usable"))

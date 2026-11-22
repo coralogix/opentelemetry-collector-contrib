@@ -112,7 +112,8 @@ func (s *brokerScraperFranz) scrape(ctx context.Context) (pmetric.Metrics, error
 		}
 	}
 
-	if metrics.KafkaBrokerLogDirsUsed.Enabled || metrics.KafkaBrokerLogDirsTotal.Enabled || metrics.KafkaBrokerLogDirsUsable.Enabled {
+	if metrics.KafkaBrokerLogDirsUsed.Enabled || metrics.KafkaBrokerLogDirsTotal.Enabled || metrics.KafkaBrokerLogDirsUsable.Enabled ||
+		metrics.KafkaBrokerPartitionSize.Enabled {
 		s.recordLogDirs(ctx, adm, now, &scrapeErrs)
 	}
 
@@ -175,6 +176,13 @@ func (s *brokerScraperFranz) recordLogDirs(ctx context.Context, adm *kadm.Client
 				continue
 			}
 			used += dir.Size()
+			if s.config.MetricsBuilderConfig.Metrics.KafkaBrokerPartitionSize.Enabled {
+				dir.Topics.Each(func(p kadm.DescribedLogDirPartition) {
+					if !p.IsFuture {
+						s.mb.RecordKafkaBrokerPartitionSizeDataPoint(now, p.Size, bidStr, p.Topic, int64(p.Partition))
+					}
+				})
+			}
 			// Brokers before Kafka 3.3 report -1 for both.
 			if dir.TotalBytes < 0 || dir.UsableBytes < 0 {
 				volumesKnown = false

@@ -47,6 +47,10 @@ var MetricsInfo = metricsInfo{
 		Name:       "kafka.broker.log_retention_period",
 		Attributes: []string{"broker"},
 	},
+	KafkaBrokerPartitionSize: metricInfo{
+		Name:       "kafka.broker.partition.size",
+		Attributes: []string{"broker", "topic", "partition"},
+	},
 	KafkaBrokerPartitionsLed: metricInfo{
 		Name:       "kafka.broker.partitions_led",
 		Attributes: []string{"broker"},
@@ -137,6 +141,7 @@ type metricsInfo struct {
 	KafkaBrokerLogDirsUsable           metricInfo
 	KafkaBrokerLogDirsUsed             metricInfo
 	KafkaBrokerLogRetentionPeriod      metricInfo
+	KafkaBrokerPartitionSize           metricInfo
 	KafkaBrokerPartitionsLed           metricInfo
 	KafkaBrokerReplicas                metricInfo
 	KafkaBrokerReplicasUnderReplicated metricInfo
@@ -521,6 +526,103 @@ func (m *metricKafkaBrokerLogRetentionPeriod) emit(metrics pmetric.MetricSlice) 
 
 func newMetricKafkaBrokerLogRetentionPeriod(cfg KafkaBrokerLogRetentionPeriodMetricConfig) metricKafkaBrokerLogRetentionPeriod {
 	m := metricKafkaBrokerLogRetentionPeriod{config: cfg}
+
+	if cfg.Enabled {
+		m.data = pmetric.NewMetric()
+		m.init()
+	}
+	return m
+}
+
+type metricKafkaBrokerPartitionSize struct {
+	data          pmetric.Metric                       // data buffer for generated metric.
+	config        KafkaBrokerPartitionSizeMetricConfig // metric config provided by user.
+	capacity      int                                  // max observed number of data points added to the metric.
+	aggDataPoints []int64                              // slice containing number of aggregated datapoints at each index
+	dpIndex       map[uint64]int                       // maps a data point's hash to its index, for O(1) dedup lookup.
+}
+
+// init fills kafka.broker.partition.size metric with initial data.
+func (m *metricKafkaBrokerPartitionSize) init() {
+	m.data.SetName("kafka.broker.partition.size")
+	m.data.SetDescription("Size of each partition replica stored in the broker's log directories. One series per replica.")
+	m.data.SetUnit("By")
+	m.data.SetEmptyGauge()
+	m.data.Gauge().DataPoints().EnsureCapacity(m.capacity)
+	m.aggDataPoints = m.aggDataPoints[:0]
+	m.dpIndex = make(map[uint64]int, m.capacity)
+}
+
+func (m *metricKafkaBrokerPartitionSize) recordDataPoint(start pcommon.Timestamp, ts pcommon.Timestamp, val int64, brokerAttributeValue string, topicAttributeValue string, partitionAttributeValue int64) {
+	if !m.config.Enabled {
+		return
+	}
+
+	dp := pmetric.NewNumberDataPoint()
+	dp.SetStartTimestamp(start)
+	dp.SetTimestamp(ts)
+	if slices.Contains(m.config.EnabledAttributes, KafkaBrokerPartitionSizeMetricAttributeKeyBroker) {
+		dp.Attributes().PutStr("broker", brokerAttributeValue)
+	}
+	if slices.Contains(m.config.EnabledAttributes, KafkaBrokerPartitionSizeMetricAttributeKeyTopic) {
+		dp.Attributes().PutStr("topic", topicAttributeValue)
+	}
+	if slices.Contains(m.config.EnabledAttributes, KafkaBrokerPartitionSizeMetricAttributeKeyPartition) {
+		dp.Attributes().PutInt("partition", partitionAttributeValue)
+	}
+
+	var s string
+	key := dataPointKey(dp)
+	dps := m.data.Gauge().DataPoints()
+	if i, ok := m.dpIndex[key]; ok {
+		dpi := dps.At(i)
+		switch s = m.config.AggregationStrategy; s {
+		case AggregationStrategySum, AggregationStrategyAvg:
+			dpi.SetIntValue(dpi.IntValue() + val)
+			m.aggDataPoints[i] += 1
+			return
+		case AggregationStrategyMin:
+			if dpi.IntValue() > val {
+				dpi.SetIntValue(val)
+			}
+			return
+		case AggregationStrategyMax:
+			if dpi.IntValue() < val {
+				dpi.SetIntValue(val)
+			}
+			return
+		}
+	}
+
+	dp.SetIntValue(val)
+	m.aggDataPoints = append(m.aggDataPoints, 1)
+	m.dpIndex[key] = dps.Len()
+	dp.MoveTo(dps.AppendEmpty())
+}
+
+// updateCapacity saves max length of data point slices that will be used for the slice capacity.
+func (m *metricKafkaBrokerPartitionSize) updateCapacity() {
+	if m.data.Gauge().DataPoints().Len() > m.capacity {
+		m.capacity = m.data.Gauge().DataPoints().Len()
+	}
+}
+
+// emit appends recorded metric data to a metrics slice and prepares it for recording another set of data points.
+func (m *metricKafkaBrokerPartitionSize) emit(metrics pmetric.MetricSlice) {
+	if m.config.Enabled && m.data.Gauge().DataPoints().Len() > 0 {
+		if m.config.AggregationStrategy == AggregationStrategyAvg {
+			for i, aggCount := range m.aggDataPoints {
+				m.data.Gauge().DataPoints().At(i).SetIntValue(m.data.Gauge().DataPoints().At(i).IntValue() / aggCount)
+			}
+		}
+		m.updateCapacity()
+		m.data.MoveTo(metrics.AppendEmpty())
+		m.init()
+	}
+}
+
+func newMetricKafkaBrokerPartitionSize(cfg KafkaBrokerPartitionSizeMetricConfig) metricKafkaBrokerPartitionSize {
+	m := metricKafkaBrokerPartitionSize{config: cfg}
 
 	if cfg.Enabled {
 		m.data = pmetric.NewMetric()
@@ -2465,6 +2567,7 @@ type MetricsBuilder struct {
 	metricKafkaBrokerLogDirsUsable           metricKafkaBrokerLogDirsUsable
 	metricKafkaBrokerLogDirsUsed             metricKafkaBrokerLogDirsUsed
 	metricKafkaBrokerLogRetentionPeriod      metricKafkaBrokerLogRetentionPeriod
+	metricKafkaBrokerPartitionSize           metricKafkaBrokerPartitionSize
 	metricKafkaBrokerPartitionsLed           metricKafkaBrokerPartitionsLed
 	metricKafkaBrokerReplicas                metricKafkaBrokerReplicas
 	metricKafkaBrokerReplicasUnderReplicated metricKafkaBrokerReplicasUnderReplicated
@@ -2515,6 +2618,7 @@ func NewMetricsBuilder(mbc MetricsBuilderConfig, settings receiver.Settings, opt
 		metricKafkaBrokerLogDirsUsable:           newMetricKafkaBrokerLogDirsUsable(mbc.Metrics.KafkaBrokerLogDirsUsable),
 		metricKafkaBrokerLogDirsUsed:             newMetricKafkaBrokerLogDirsUsed(mbc.Metrics.KafkaBrokerLogDirsUsed),
 		metricKafkaBrokerLogRetentionPeriod:      newMetricKafkaBrokerLogRetentionPeriod(mbc.Metrics.KafkaBrokerLogRetentionPeriod),
+		metricKafkaBrokerPartitionSize:           newMetricKafkaBrokerPartitionSize(mbc.Metrics.KafkaBrokerPartitionSize),
 		metricKafkaBrokerPartitionsLed:           newMetricKafkaBrokerPartitionsLed(mbc.Metrics.KafkaBrokerPartitionsLed),
 		metricKafkaBrokerReplicas:                newMetricKafkaBrokerReplicas(mbc.Metrics.KafkaBrokerReplicas),
 		metricKafkaBrokerReplicasUnderReplicated: newMetricKafkaBrokerReplicasUnderReplicated(mbc.Metrics.KafkaBrokerReplicasUnderReplicated),
@@ -2624,6 +2728,7 @@ func (mb *MetricsBuilder) EmitForResource(options ...ResourceMetricsOption) {
 	mb.metricKafkaBrokerLogDirsUsable.emit(ils.Metrics())
 	mb.metricKafkaBrokerLogDirsUsed.emit(ils.Metrics())
 	mb.metricKafkaBrokerLogRetentionPeriod.emit(ils.Metrics())
+	mb.metricKafkaBrokerPartitionSize.emit(ils.Metrics())
 	mb.metricKafkaBrokerPartitionsLed.emit(ils.Metrics())
 	mb.metricKafkaBrokerReplicas.emit(ils.Metrics())
 	mb.metricKafkaBrokerReplicasUnderReplicated.emit(ils.Metrics())
@@ -2694,6 +2799,11 @@ func (mb *MetricsBuilder) RecordKafkaBrokerLogDirsUsedDataPoint(ts pcommon.Times
 // RecordKafkaBrokerLogRetentionPeriodDataPoint adds a data point to kafka.broker.log_retention_period metric.
 func (mb *MetricsBuilder) RecordKafkaBrokerLogRetentionPeriodDataPoint(ts pcommon.Timestamp, val int64, brokerAttributeValue string) {
 	mb.metricKafkaBrokerLogRetentionPeriod.recordDataPoint(mb.startTime, ts, val, brokerAttributeValue)
+}
+
+// RecordKafkaBrokerPartitionSizeDataPoint adds a data point to kafka.broker.partition.size metric.
+func (mb *MetricsBuilder) RecordKafkaBrokerPartitionSizeDataPoint(ts pcommon.Timestamp, val int64, brokerAttributeValue string, topicAttributeValue string, partitionAttributeValue int64) {
+	mb.metricKafkaBrokerPartitionSize.recordDataPoint(mb.startTime, ts, val, brokerAttributeValue, topicAttributeValue, partitionAttributeValue)
 }
 
 // RecordKafkaBrokerPartitionsLedDataPoint adds a data point to kafka.broker.partitions_led metric.

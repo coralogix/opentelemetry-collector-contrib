@@ -46,6 +46,11 @@ func TestMetricsBuilderConfig(t *testing.T) {
 						AggregationStrategy: AggregationStrategyAvg,
 						EnabledAttributes:   []KafkaBrokerLogRetentionPeriodMetricAttributeKey{KafkaBrokerLogRetentionPeriodMetricAttributeKeyBroker},
 					},
+					KafkaBrokerPartitionSize: KafkaBrokerPartitionSizeMetricConfig{
+						Enabled:             true,
+						AggregationStrategy: AggregationStrategyAvg,
+						EnabledAttributes:   []KafkaBrokerPartitionSizeMetricAttributeKey{KafkaBrokerPartitionSizeMetricAttributeKeyBroker, KafkaBrokerPartitionSizeMetricAttributeKeyTopic, KafkaBrokerPartitionSizeMetricAttributeKeyPartition},
+					},
 					KafkaBrokerPartitionsLed: KafkaBrokerPartitionsLedMetricConfig{
 						Enabled:             true,
 						AggregationStrategy: AggregationStrategySum,
@@ -180,6 +185,11 @@ func TestMetricsBuilderConfig(t *testing.T) {
 						AggregationStrategy: AggregationStrategyAvg,
 						EnabledAttributes:   []KafkaBrokerLogRetentionPeriodMetricAttributeKey{KafkaBrokerLogRetentionPeriodMetricAttributeKeyBroker},
 					},
+					KafkaBrokerPartitionSize: KafkaBrokerPartitionSizeMetricConfig{
+						Enabled:             false,
+						AggregationStrategy: AggregationStrategyAvg,
+						EnabledAttributes:   []KafkaBrokerPartitionSizeMetricAttributeKey{KafkaBrokerPartitionSizeMetricAttributeKeyBroker, KafkaBrokerPartitionSizeMetricAttributeKeyTopic, KafkaBrokerPartitionSizeMetricAttributeKeyPartition},
+					},
 					KafkaBrokerPartitionsLed: KafkaBrokerPartitionsLedMetricConfig{
 						Enabled:             false,
 						AggregationStrategy: AggregationStrategySum,
@@ -294,7 +304,7 @@ func TestMetricsBuilderConfig(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := loadMetricsBuilderConfig(t, tt.name)
-			diff := cmp.Diff(tt.want, cfg, cmpopts.IgnoreUnexported(KafkaBrokerLogDirsTotalMetricConfig{}, KafkaBrokerLogDirsUsableMetricConfig{}, KafkaBrokerLogDirsUsedMetricConfig{}, KafkaBrokerLogRetentionPeriodMetricConfig{}, KafkaBrokerPartitionsLedMetricConfig{}, KafkaBrokerReplicasMetricConfig{}, KafkaBrokerReplicasUnderReplicatedMetricConfig{}, KafkaBrokersMetricConfig{}, KafkaConsumerGroupLagMetricConfig{}, KafkaConsumerGroupLagSumMetricConfig{}, KafkaConsumerGroupMembersMetricConfig{}, KafkaConsumerGroupOffsetMetricConfig{}, KafkaConsumerGroupOffsetSumMetricConfig{}, KafkaPartitionCurrentOffsetMetricConfig{}, KafkaPartitionLeaderIDMetricConfig{}, KafkaPartitionOfflineMetricConfig{}, KafkaPartitionOldestOffsetMetricConfig{}, KafkaPartitionReplicasMetricConfig{}, KafkaPartitionReplicasInSyncMetricConfig{}, KafkaTopicLogRetentionPeriodMetricConfig{}, KafkaTopicLogRetentionSizeMetricConfig{}, KafkaTopicMinInsyncReplicasMetricConfig{}, KafkaTopicPartitionsMetricConfig{}, KafkaTopicReplicationFactorMetricConfig{}, KafkaTopicSizeMetricConfig{}, ResourceAttributeConfig{}))
+			diff := cmp.Diff(tt.want, cfg, cmpopts.IgnoreUnexported(KafkaBrokerLogDirsTotalMetricConfig{}, KafkaBrokerLogDirsUsableMetricConfig{}, KafkaBrokerLogDirsUsedMetricConfig{}, KafkaBrokerLogRetentionPeriodMetricConfig{}, KafkaBrokerPartitionSizeMetricConfig{}, KafkaBrokerPartitionsLedMetricConfig{}, KafkaBrokerReplicasMetricConfig{}, KafkaBrokerReplicasUnderReplicatedMetricConfig{}, KafkaBrokersMetricConfig{}, KafkaConsumerGroupLagMetricConfig{}, KafkaConsumerGroupLagSumMetricConfig{}, KafkaConsumerGroupMembersMetricConfig{}, KafkaConsumerGroupOffsetMetricConfig{}, KafkaConsumerGroupOffsetSumMetricConfig{}, KafkaPartitionCurrentOffsetMetricConfig{}, KafkaPartitionLeaderIDMetricConfig{}, KafkaPartitionOfflineMetricConfig{}, KafkaPartitionOldestOffsetMetricConfig{}, KafkaPartitionReplicasMetricConfig{}, KafkaPartitionReplicasInSyncMetricConfig{}, KafkaTopicLogRetentionPeriodMetricConfig{}, KafkaTopicLogRetentionSizeMetricConfig{}, KafkaTopicMinInsyncReplicasMetricConfig{}, KafkaTopicPartitionsMetricConfig{}, KafkaTopicReplicationFactorMetricConfig{}, KafkaTopicSizeMetricConfig{}, ResourceAttributeConfig{}))
 			require.Emptyf(t, diff, "Config mismatch (-expected +actual):\n%s", diff)
 		})
 	}
@@ -343,6 +353,18 @@ func TestKafkaBrokerLogRetentionPeriodMetricsConfig_Validate(t *testing.T) {
 	require.ErrorContains(t, cfg.Validate(), "metric kafka.broker.log_retention_period doesn't have an attribute invalid, valid attributes: [broker]")
 
 	cfg = DefaultMetricsConfig().KafkaBrokerLogRetentionPeriod
+	cfg.AggregationStrategy = "invalid"
+	require.ErrorContains(t, cfg.Validate(), "invalid aggregation strategy")
+}
+
+func TestKafkaBrokerPartitionSizeMetricsConfig_Validate(t *testing.T) {
+	cfg := DefaultMetricsConfig().KafkaBrokerPartitionSize
+	require.NoError(t, cfg.Validate())
+
+	cfg.EnabledAttributes = []KafkaBrokerPartitionSizeMetricAttributeKey{"invalid"}
+	require.ErrorContains(t, cfg.Validate(), "metric kafka.broker.partition.size doesn't have an attribute invalid, valid attributes: [broker, topic, partition]")
+
+	cfg = DefaultMetricsConfig().KafkaBrokerPartitionSize
 	cfg.AggregationStrategy = "invalid"
 	require.ErrorContains(t, cfg.Validate(), "invalid aggregation strategy")
 }

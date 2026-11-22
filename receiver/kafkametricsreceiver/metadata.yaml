@@ -78,6 +78,14 @@ metrics:
     gauge:
       value_type: int
     attributes: [broker]
+  kafka.broker.partition.size:
+    enabled: false
+    description: Size of each partition replica stored in the broker's log directories. One series per replica.
+    stability: development
+    unit: By
+    gauge:
+      value_type: int
+    attributes: [broker, topic, partition]
   kafka.broker.partitions_led:
     enabled: true
     description: Number of partitions, including internal topics, whose leader is the broker.

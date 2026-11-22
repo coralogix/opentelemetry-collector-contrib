@@ -308,6 +308,22 @@ log retention time (s) of a broker.
 | ---- | ----------- | ------ | ----------------- | ------------------- |
 | broker | The ID of the kafka broker | Any Str | Recommended | - |
 
+### kafka.broker.partition.size
+
+Size of each partition replica stored in the broker's log directories. One series per replica.
+
+| Unit | Metric Type | Value Type | Stability |
+| ---- | ----------- | ---------- | --------- |
+| By | Gauge | Int | Development |
+
+#### Attributes
+
+| Name | Description | Values | Requirement Level | Semantic Convention |
+| ---- | ----------- | ------ | ----------------- | ------------------- |
+| broker | The ID of the kafka broker | Any Str | Recommended | - |
+| topic | The ID (integer) of a topic | Any Str | Recommended | - |
+| partition | The number (integer) of the partition | Any Int | Recommended | - |
+
 ### kafka.topic.log_retention_period
 
 log retention period of a topic (s).

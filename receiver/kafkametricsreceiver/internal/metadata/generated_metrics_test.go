@@ -71,6 +71,7 @@ func TestMetricsBuilder(t *testing.T) {
 			aggMap["kafka.broker.log_dirs.usable"] = mb.metricKafkaBrokerLogDirsUsable.config.AggregationStrategy
 			aggMap["kafka.broker.log_dirs.used"] = mb.metricKafkaBrokerLogDirsUsed.config.AggregationStrategy
 			aggMap["kafka.broker.log_retention_period"] = mb.metricKafkaBrokerLogRetentionPeriod.config.AggregationStrategy
+			aggMap["kafka.broker.partition.size"] = mb.metricKafkaBrokerPartitionSize.config.AggregationStrategy
 			aggMap["kafka.broker.partitions_led"] = mb.metricKafkaBrokerPartitionsLed.config.AggregationStrategy
 			aggMap["kafka.broker.replicas"] = mb.metricKafkaBrokerReplicas.config.AggregationStrategy
 			aggMap["kafka.broker.replicas.under_replicated"] = mb.metricKafkaBrokerReplicasUnderReplicated.config.AggregationStrategy
@@ -134,6 +135,15 @@ func TestMetricsBuilder(t *testing.T) {
 				// a different timestamp is a different key: must not merge with the above.
 				mb.RecordKafkaBrokerLogRetentionPeriodDataPoint(ts+1, 3, "broker-val-2")
 				assert.Equal(t, 2, mb.metricKafkaBrokerLogRetentionPeriod.data.Gauge().DataPoints().Len())
+			}
+
+			allMetricsCount++
+			mb.RecordKafkaBrokerPartitionSizeDataPoint(ts, 1, "broker-val", "topic-val", 9)
+			if tt.name == "reaggregate_set" {
+				mb.RecordKafkaBrokerPartitionSizeDataPoint(ts, 3, "broker-val-2", "topic-val-2", 10)
+				// a different timestamp is a different key: must not merge with the above.
+				mb.RecordKafkaBrokerPartitionSizeDataPoint(ts+1, 3, "broker-val-2", "topic-val-2", 10)
+				assert.Equal(t, 2, mb.metricKafkaBrokerPartitionSize.data.Gauge().DataPoints().Len())
 			}
 			defaultMetricsCount++
 			allMetricsCount++
@@ -329,6 +339,7 @@ func TestMetricsBuilder(t *testing.T) {
 				assert.Empty(t, mb.metricKafkaBrokerLogDirsUsable.aggDataPoints)
 				assert.Empty(t, mb.metricKafkaBrokerLogDirsUsed.aggDataPoints)
 				assert.Empty(t, mb.metricKafkaBrokerLogRetentionPeriod.aggDataPoints)
+				assert.Empty(t, mb.metricKafkaBrokerPartitionSize.aggDataPoints)
 				assert.Empty(t, mb.metricKafkaBrokerPartitionsLed.aggDataPoints)
 				assert.Empty(t, mb.metricKafkaBrokerReplicas.aggDataPoints)
 				assert.Empty(t, mb.metricKafkaBrokerReplicasUnderReplicated.aggDataPoints)
@@ -542,6 +553,58 @@ func TestMetricsBuilder(t *testing.T) {
 							assert.Equal(t, int64(3), dp.IntValue())
 						}
 						_, ok := dp.Attributes().Get("broker")
+						assert.False(t, ok)
+					}
+				case "kafka.broker.partition.size":
+					if tt.name != "reaggregate_set" {
+						assert.False(t, validatedMetrics["kafka.broker.partition.size"], "Found a duplicate in the metrics slice: kafka.broker.partition.size")
+						validatedMetrics["kafka.broker.partition.size"] = true
+						assert.Equal(t, pmetric.MetricTypeGauge, mi.Type())
+						assert.Equal(t, 1, mi.Gauge().DataPoints().Len())
+						assert.Equal(t, "Size of each partition replica stored in the broker's log directories. One series per replica.", mi.Description())
+						assert.Equal(t, "By", mi.Unit())
+						dp := mi.Gauge().DataPoints().At(0)
+						assert.Equal(t, start, dp.StartTimestamp())
+						assert.Equal(t, ts, dp.Timestamp())
+						assert.Equal(t, pmetric.NumberDataPointValueTypeInt, dp.ValueType())
+						assert.Equal(t, int64(1), dp.IntValue())
+						brokerAttrVal, ok := dp.Attributes().Get("broker")
+						assert.True(t, ok)
+						assert.Equal(t, "broker-val", brokerAttrVal.Str())
+						topicAttrVal, ok := dp.Attributes().Get("topic")
+						assert.True(t, ok)
+						assert.Equal(t, "topic-val", topicAttrVal.Str())
+						partitionAttrVal, ok := dp.Attributes().Get("partition")
+						assert.True(t, ok)
+						assert.EqualValues(t, 9, partitionAttrVal.Int())
+					} else {
+						assert.False(t, validatedMetrics["kafka.broker.partition.size"], "Found a duplicate in the metrics slice: kafka.broker.partition.size")
+						validatedMetrics["kafka.broker.partition.size"] = true
+						assert.Equal(t, pmetric.MetricTypeGauge, mi.Type())
+						// 2 points: the merged one above, plus one with a different timestamp that must not have merged with it.
+						assert.Equal(t, 2, mi.Gauge().DataPoints().Len())
+						assert.Equal(t, ts+1, mi.Gauge().DataPoints().At(1).Timestamp())
+						assert.Equal(t, "Size of each partition replica stored in the broker's log directories. One series per replica.", mi.Description())
+						assert.Equal(t, "By", mi.Unit())
+						dp := mi.Gauge().DataPoints().At(0)
+						assert.Equal(t, start, dp.StartTimestamp())
+						assert.Equal(t, ts, dp.Timestamp())
+						assert.Equal(t, pmetric.NumberDataPointValueTypeInt, dp.ValueType())
+						switch aggMap["kafka.broker.partition.size"] {
+						case "sum":
+							assert.Equal(t, int64(4), dp.IntValue())
+						case "avg":
+							assert.Equal(t, int64(2), dp.IntValue())
+						case "min":
+							assert.Equal(t, int64(1), dp.IntValue())
+						case "max":
+							assert.Equal(t, int64(3), dp.IntValue())
+						}
+						_, ok := dp.Attributes().Get("broker")
+						assert.False(t, ok)
+						_, ok = dp.Attributes().Get("topic")
+						assert.False(t, ok)
+						_, ok = dp.Attributes().Get("partition")
 						assert.False(t, ok)
 					}
 				case "kafka.broker.partitions_led":
