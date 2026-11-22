@@ -124,7 +124,7 @@ func TestEntities_ReportsClusterBrokersTopicsAndGroups(t *testing.T) {
 	clusterID := clusters[0].id[attrClusterID]
 	require.NotEmpty(t, clusterID)
 	assert.Equal(t, "orders-prod", clusters[0].attrs[attrClusterAlias])
-	assert.NotEmpty(t, clusters[0].attrs["kafka.cluster.metadata_mode"])
+	assert.Contains(t, []any{"KRaft", "ZooKeeper"}, clusters[0].attrs["kafka.cluster.metadata_mode"])
 
 	brokers := byType(recs, "entity_state", entityTypeBroker)
 	require.Len(t, brokers, 3)
@@ -259,4 +259,29 @@ func TestMemberHost_DropsTheLeadingSlash(t *testing.T) {
 	assert.Equal(t, "10.0.1.114", memberHost("/10.0.1.114"))
 	assert.Equal(t, "10.0.1.114", memberHost("10.0.1.114"))
 	assert.Empty(t, memberHost(""))
+}
+
+func TestEntities_ClusterCarriesTheSettingsBrokersStartFrom(t *testing.T) {
+	_, clientCfg := kafkatest.NewCluster(t, kfake.NumBrokers(2), kfake.SeedTopics(1, "orders"))
+	cfg := createDefaultConfig().(*Config)
+	cfg.ClientConfig = clientCfg
+	recs := build(t, newTestEntitiesReceiver(t, *cfg))
+
+	cluster := byType(recs, "entity_state", entityTypeCluster)[0]
+	brokerValues := map[string]any{}
+	for _, b := range byType(recs, "entity_state", entityTypeBroker) {
+		for k, v := range b.attrs {
+			brokerValues[k] = v
+		}
+	}
+	found := 0
+	for k, v := range cluster.attrs {
+		if !strings.HasPrefix(k, "kafka.broker.config.") {
+			continue
+		}
+		found++
+		assert.Contains(t, clusterStartingConfigs, strings.TrimPrefix(k, "kafka.broker.config."))
+		assert.Equal(t, brokerValues[k], v, "the cluster reports a broker's own value for %q", k)
+	}
+	assert.Positive(t, found)
 }

@@ -58,6 +58,11 @@ var (
 		"delete.topic.enable", "inter.broker.protocol.version",
 		"offsets.retention.minutes", "group.initial.rebalance.delay.ms",
 	}
+	// Settings every broker starts from, reported on the cluster as one broker's values.
+	clusterStartingConfigs = []string{
+		"num.partitions", "default.replication.factor", "min.insync.replicas", "log.retention.hours",
+		"log.retention.bytes", "auto.create.topics.enable", "unclean.leader.election.enable",
+	}
 	curatedTopicConfigs = []string{
 		"cleanup.policy", "retention.ms", "retention.bytes", "min.insync.replicas", "max.message.bytes",
 		"segment.bytes", "segment.ms", "compression.type", "unclean.leader.election.enable",
@@ -220,6 +225,7 @@ func (r *entitiesReceiver) buildEvents(ctx context.Context) (metadataPkg.EntityE
 		}
 	}
 	r.putConfigs(cluster, "kafka.cluster", brokerConfigs[""], curatedBrokerConfigs)
+	r.putStartingConfigs(cluster, brokerConfigs, controller, md.Brokers.NodeIDs())
 
 	// Brokers
 	for _, b := range md.Brokers {
@@ -346,7 +352,7 @@ func memberHost(clientHost string) string {
 // On KRaft the Metadata response names a random broker as controller, so the quorum leader is used instead.
 func (r *entitiesReceiver) quorum(ctx context.Context, metadataController int32, versions kadm.BrokersApiVersions) (int32, []int32, string) {
 	if len(versions) > 0 && !supportsDescribeQuorum(versions) {
-		return metadataController, nil, "zookeeper"
+		return metadataController, nil, "ZooKeeper"
 	}
 	kcl, err := r.clients.client(ctx, r.host)
 	if err != nil {
@@ -364,14 +370,14 @@ func (r *entitiesReceiver) quorum(ctx context.Context, metadataController int32,
 	}
 	p := resp.Topics[0].Partitions[0]
 	if p.ErrorCode != 0 {
-		return metadataController, nil, "kraft"
+		return metadataController, nil, "KRaft"
 	}
 	voters := make([]int32, 0, len(p.CurrentVoters))
 	for _, v := range p.CurrentVoters {
 		voters = append(voters, v.ReplicaID)
 	}
 	slices.Sort(voters)
-	return p.LeaderID, voters, "kraft"
+	return p.LeaderID, voters, "KRaft"
 }
 
 // supportsDescribeQuorum is false on ZooKeeper clusters, whose brokers do not implement the request.
@@ -463,6 +469,30 @@ func (r *entitiesReceiver) putConfigs(attrs pcommon.Map, prefix string, rc kadm.
 		}
 		attrs.PutStr(prefix+".config."+c.Key, *c.Value)
 		attrs.PutStr(prefix+".config_source."+c.Key, c.Source.String())
+	}
+}
+
+// putStartingConfigs copies clusterStartingConfigs from the controller, or else the lowest-ID broker that reported configs.
+func (r *entitiesReceiver) putStartingConfigs(cluster pcommon.Map, configs map[string]kadm.ResourceConfig, controller int32, brokerIDs []int32) {
+	ids := append([]int32{controller}, slices.Sorted(slices.Values(brokerIDs))...)
+	for _, id := range ids {
+		rc, ok := configs[strconv.Itoa(int(id))]
+		if !ok || len(rc.Configs) == 0 {
+			continue
+		}
+		wanted := make(map[string]struct{}, len(clusterStartingConfigs))
+		for _, k := range clusterStartingConfigs {
+			wanted[k] = struct{}{}
+		}
+		starting := rc
+		starting.Configs = nil
+		for _, c := range rc.Configs {
+			if _, ok := wanted[c.Key]; ok {
+				starting.Configs = append(starting.Configs, c)
+			}
+		}
+		r.putConfigs(cluster, "kafka.broker", starting, clusterStartingConfigs)
+		return
 	}
 }
 
