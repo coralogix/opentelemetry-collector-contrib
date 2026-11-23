@@ -5,6 +5,7 @@ package kafkametricsreceiver // import "github.com/open-telemetry/opentelemetry-
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"regexp"
@@ -217,6 +218,11 @@ func (r *entitiesReceiver) buildEvents(ctx context.Context) (metadataPkg.EntityE
 	cluster.PutStr("kafka.cluster.metadata_mode", mode)
 	if controller >= 0 {
 		cluster.PutStr("kafka.cluster.controller.id", strconv.Itoa(int(controller)))
+		for _, b := range md.Brokers {
+			if b.NodeID == controller {
+				cluster.PutStr("kafka.cluster.controller.host", b.Host)
+			}
+		}
 	}
 	if len(voters) > 0 {
 		vs := cluster.PutEmptySlice("kafka.cluster.controller.voters")
@@ -269,6 +275,9 @@ func (r *entitiesReceiver) buildEvents(ctx context.Context) (metadataPkg.EntityE
 		attrs := state(entityTypeTopic, map[string]string{attrClusterID: clusterID, attrTopicName: name})
 		attrs.PutStr(attrClusterID, clusterID)
 		attrs.PutStr(attrTopicName, name)
+		if id, ok := topicID(t.ID); ok {
+			attrs.PutStr("kafka.topic.id", id)
+		}
 		attrs.PutInt("kafka.topic.partitions", int64(len(t.Partitions)))
 		attrs.PutInt("kafka.topic.replication_factor", int64(replicationFactor(t)))
 		attrs.PutBool("kafka.topic.internal", t.IsInternal)
@@ -545,6 +554,14 @@ func idKey(id map[string]string) string {
 		b.WriteString(k + "=" + id[k] + ";")
 	}
 	return b.String()
+}
+
+// topicID renders a topic ID the way Kafka's tools print it; false when the broker reported none.
+func topicID(id kadm.TopicID) (string, bool) {
+	if id == (kadm.TopicID{}) {
+		return "", false
+	}
+	return base64.RawURLEncoding.EncodeToString(id[:]), true
 }
 
 // replicaBrokers returns the sorted IDs of the brokers holding a replica of any of the topic's partitions.

@@ -127,6 +127,7 @@ func TestEntities_ReportsClusterBrokersTopicsAndGroups(t *testing.T) {
 	require.NotEmpty(t, clusterID)
 	assert.Equal(t, "orders-prod", clusters[0].attrs[attrClusterAlias])
 	assert.Contains(t, []any{"KRaft", "ZooKeeper"}, clusters[0].attrs["kafka.cluster.metadata_mode"])
+	assert.NotEmpty(t, clusters[0].attrs["kafka.cluster.controller.host"])
 
 	brokers := byType(recs, "entity_state", entityTypeBroker)
 	require.Len(t, brokers, 3)
@@ -290,4 +291,12 @@ func TestEntities_ClusterCarriesTheSettingsBrokersStartFrom(t *testing.T) {
 		assert.Equal(t, brokerValues[k], v, "the cluster reports a broker's own value for %q", k)
 	}
 	assert.Positive(t, found)
+}
+
+func TestTopicID_PrintsKafkasFormatAndSkipsTheZeroID(t *testing.T) {
+	_, ok := topicID(kadm.TopicID{})
+	assert.False(t, ok)
+	id, ok := topicID(kadm.TopicID{0x5e, 0x1d, 0xa4, 0xf6, 0x49, 0x8b, 0x4f, 0x5c, 0x82, 0xee, 0x96, 0x0f, 0x2c, 0x4c, 0xbe, 0x13})
+	assert.True(t, ok)
+	assert.Equal(t, "Xh2k9kmLT1yC7pYPLEy-Ew", id)
 }
