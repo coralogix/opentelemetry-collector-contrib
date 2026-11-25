@@ -19,6 +19,7 @@ body:
       - cmd/oteltestbedcol
       - cmd/telemetrygen
       - config/configdbauth
+      - config/xconfigunit
       - confmap/provider/aesprovider
       - confmap/provider/googlesecretmanagerprovider
       - confmap/provider/objstoreprovider
@@ -198,6 +199,7 @@ body:
       - pkg/translator/splunk
       - pkg/translator/zipkin
       - pkg/winperfcounters
+      - pkg/xcompression
       - pkg/xk8stest
       - pkg/xstreamencoding
       - processor/adaptivetailsampling
@@ -253,6 +255,7 @@ body:
       - processor/telemetrypolicy
       - processor/transform
       - processor/transform/internal/logparsingfuncs
+      - processor/transform/xtransform
       - processor/unroll
       - processor/verify
       - receiver/activedirectoryds
@@ -303,6 +306,7 @@ body:
       - receiver/hostmetrics/internal/scraper/cpuscraper
       - receiver/hostmetrics/internal/scraper/diskscraper
       - receiver/hostmetrics/internal/scraper/filesystemscraper
+      - receiver/hostmetrics/internal/scraper/hardwarescraper
       - receiver/hostmetrics/internal/scraper/loadscraper
       - receiver/hostmetrics/internal/scraper/memoryscraper
       - receiver/hostmetrics/internal/scraper/networkscraper
