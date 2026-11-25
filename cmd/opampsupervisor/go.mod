@@ -302,7 +302,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.114.10
 	github.com/coralogix/opentelemetry-collector-contrib/confmap/provider/objstoreprovider v0.162.0
 	github.com/open-telemetry/opentelemetry-collector-contrib/confmap/provider/s3provider v0.166.0
-	gopkg.in/yaml.v3 v3.0.1
 )
 
 replace github.com/coralogix/opentelemetry-collector-contrib/confmap/provider/objstoreprovider => ../../confmap/provider/objstoreprovider

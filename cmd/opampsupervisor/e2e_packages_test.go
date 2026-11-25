@@ -623,7 +623,6 @@ func TestSupervisorRollsBackFailedAgentUpgrade(t *testing.T) {
 			require.Eventually(t, func() bool {
 				return env.server.lastVersion() == oldAgentVersion && env.server.isHealthy() && env.collectorServesHealthCheck()
 			}, 30*time.Second, 250*time.Millisecond, "the previous agent must run again after the rollback")
-
 		})
 	}
 }
