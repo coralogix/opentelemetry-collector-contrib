@@ -300,3 +300,12 @@ func TestTopicID_PrintsKafkasFormatAndSkipsTheZeroID(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, "Xh2k9kmLT1yC7pYPLEy-Ew", id)
 }
+
+func TestSortedMembers_IgnoresTheBrokersOrder(t *testing.T) {
+	a := kadm.DescribedGroupMember{MemberID: "m-2", ClientID: "app", ClientHost: "/10.0.0.2"}
+	b := kadm.DescribedGroupMember{MemberID: "m-1", ClientID: "app", ClientHost: "/10.0.0.1"}
+	c := kadm.DescribedGroupMember{MemberID: "m-3", ClientID: "audit", ClientHost: "/10.0.0.1"}
+	want := []kadm.DescribedGroupMember{b, a, c}
+	assert.Equal(t, want, sortedMembers([]kadm.DescribedGroupMember{a, c, b}))
+	assert.Equal(t, want, sortedMembers([]kadm.DescribedGroupMember{c, b, a}))
+}

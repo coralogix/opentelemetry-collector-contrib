@@ -4,6 +4,7 @@
 package kafkametricsreceiver // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/kafkametricsreceiver"
 
 import (
+	"cmp"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -334,7 +335,7 @@ func (r *entitiesReceiver) groups(ctx context.Context, adm *kadm.Client, cluster
 		putNonEmpty(attrs, "kafka.consumer_group.coordinator.host", l.Coordinator.Host)
 		attrs.PutInt("kafka.consumer_group.members", int64(len(l.Members)))
 		members := attrs.PutEmptySlice("kafka.consumer_group.member_list")
-		for _, m := range l.Members {
+		for _, m := range sortedMembers(l.Members) {
 			mm := members.AppendEmpty().SetEmptyMap()
 			mm.PutStr("client_id", m.ClientID)
 			mm.PutStr("host", memberHost(m.ClientHost))
@@ -360,6 +361,19 @@ func (r *entitiesReceiver) groups(ctx context.Context, adm *kadm.Client, cluster
 		}
 	}
 	return nil
+}
+
+// sortedMembers orders members by client, host and member ID, so a reorder by the broker is not reported as a change.
+func sortedMembers(members []kadm.DescribedGroupMember) []kadm.DescribedGroupMember {
+	out := slices.Clone(members)
+	slices.SortFunc(out, func(a, b kadm.DescribedGroupMember) int {
+		return cmp.Or(
+			strings.Compare(a.ClientID, b.ClientID),
+			strings.Compare(a.ClientHost, b.ClientHost),
+			strings.Compare(a.MemberID, b.MemberID),
+		)
+	})
+	return out
 }
 
 // memberHost drops the "/" Kafka puts in front of a member's client address ("/10.0.1.114").
